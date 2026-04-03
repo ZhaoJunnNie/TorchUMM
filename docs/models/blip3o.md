@@ -2,7 +2,7 @@
 
 Image generation model from Salesforce. Generation only — no understanding or editing.
 
-- **Original repository:** <https://github.com/salesforce/BLIP3o>
+- **Original repository:** <https://github.com/JiuhaiChen/BLIP3o>
 - **Backbone key:** `blip3o`
 - **Capabilities:** Generation ONLY
 
