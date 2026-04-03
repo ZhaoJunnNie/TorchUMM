@@ -58,7 +58,7 @@
 
 - **Pluggable backbone architecture** — 14 multimodal model adapters with a unified inference interface
 - **Comprehensive evaluation** — 10+ benchmarks covering generation, understanding, and editing
-- **Post-training support** — SFT, IRG, recA, UniCot
+- **Post-training support** — SFT, IRG, recA, UniCot, Unigame
 - **Cloud-native** — seamless scaling to cloud GPUs via [Modal](https://modal.com) ([details](modal/README.md))
 - **Config-driven** — all behavior controlled through YAML configs; no code changes needed to switch models or benchmarks
 
