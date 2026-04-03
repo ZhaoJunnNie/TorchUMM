@@ -8,7 +8,7 @@ Reference: https://github.com/zlab-princeton/UEval
 
 ## Data
 
-The dataset is hosted on HuggingFace: `primerL/UEval-all`
+The dataset is hosted on HuggingFace: `zlab-princeton/UEval`
 
 ### Modal (cloud)
 
