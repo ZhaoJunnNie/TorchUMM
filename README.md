@@ -928,6 +928,7 @@ PYTHONPATH=src python -m umm.cli.main train --config configs/posttrain/bagel_sft
 
 If you find TorchUMM useful in your research, please consider citing:
 
+<!--
 ```bibtex
 @misc{torchumm2025,
   title   = {TorchUMM: Unified Multimodal Model Toolkit},
@@ -936,3 +937,4 @@ If you find TorchUMM useful in your research, please consider citing:
   url     = {https://github.com/<your-org>/TorchUMM}
 }
 ```
+-->
