@@ -143,7 +143,7 @@ umm_codebase/
 
 ```bash
 # Clone the repository
-git clone --recursive https://github.com/<your-org>/TorchUMM.git](https://github.com/AIFrontierLab/TorchUMM.git
+git clone --recursive https://github.com/AIFrontierLab/TorchUMM.git
 cd TorchUMM
 
 # Install the package
