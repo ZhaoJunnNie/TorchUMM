@@ -5,7 +5,7 @@
 <h3 align="center">TorchUMM: Unified Multimodal Model Toolkit</h3>
 
 <p align="center">
-  A unified framework for multimodal model inference, evaluation, and post-training.
+  A unified framework for unified multimodal model inference, evaluation, and post-training.
 </p>
 
 <p align="center">
