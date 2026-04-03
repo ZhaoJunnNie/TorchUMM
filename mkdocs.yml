@@ -1,8 +1,8 @@
 site_name: TorchUMM
 site_description: Unified Multimodal Model Toolkit for inference, evaluation, and post-training
-site_url: https://ApiaoSamaa.github.io/umm_codebase/
-repo_url: https://github.com/ApiaoSamaa/umm_codebase
-repo_name: ApiaoSamaa/umm_codebase
+site_url: https://github.com/AIFrontierLab/TorchUMM
+repo_url: https://github.com/AIFrontierLab/TorchUMM
+repo_name: AIFrontierLab/TorchUMM
 
 theme:
   name: material
@@ -61,7 +61,7 @@ plugins:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/ApiaoSamaa/umm_codebase
+      link: https://github.com/AIFrontierLab/TorchUMM
 
 nav:
   - Home: index.md

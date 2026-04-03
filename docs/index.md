@@ -54,7 +54,7 @@ TorchUMM provides a single, config-driven interface for running, evaluating, and
 **Install**
 
 ```bash
-git clone --recursive https://github.com/ApiaoSamaa/umm_codebase.git
+git clone --recursive https://github.com/AIFrontierLab/TorchUMM/
 cd umm_codebase
 pip install -e .
 ```

@@ -2,9 +2,6 @@
 
 TorchUMM integrates with [Modal](https://modal.com) for running inference, evaluation, and training on cloud GPUs. Each model runs in an isolated container image with the correct Python, PyTorch, and dependency versions --- no local environment conflicts.
 
-!!! info "Full documentation"
-    This page provides a quick overview. For the complete Modal infrastructure reference, see [modal/README.md](https://github.com/ApiaoSamaa/umm_codebase/blob/main/modal/README.md) in the repository.
-
 ---
 
 ## Setup

@@ -8,7 +8,7 @@ This guide walks through installation, basic inference, evaluation, and post-tra
 
 ```bash
 # Clone the repository (including model submodules)
-git clone --recursive https://github.com/ApiaoSamaa/umm_codebase.git
+git clone --recursive https://github.com/AIFrontierLab/TorchUMM/
 cd umm_codebase
 
 # Install the core package
