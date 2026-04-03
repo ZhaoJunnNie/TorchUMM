@@ -80,7 +80,7 @@
 | [Show-o](https://github.com/showlab/Show-o)             |   1.3B    |     ✅     |    ✅    |  ❌  |  [guide](docs/models/show_o.md)   |
 | [Show-o2](https://github.com/showlab/Show-o)           | 1.5B, 7B  |     ✅     |    ✅    |  ❌  |  [guide](docs/models/show_o2.md)  |
 | [BLIP3-o](https://github.com/salesforce/BLIP3o)        |    4B     |     ❌     |    ✅    |  ❌  |  [guide](docs/models/blip3o.md)  |
-| [TokenFlow](https://github.com/ByteFlow-AI/TokenFlow)  |    7B     |     ❌     |    ✅    |  ❌  | [guide](docs/models/tokenflow.md) |
+| [TokenFlow](https://github.com/ByteFlow-AI/TokenFlow)  |          |     ❌     |    ✅    |  ❌  | [guide](docs/models/tokenflow.md) |
 | [Ovis-U1](https://github.com/AIDC-AI/Ovis-U1)         |    3B     |     ✅     |    ✅    |  ✅  | [guide](docs/models/ovis_u1.md)  |
 
 > See each model's [guide](docs/models/) for detailed usage instructions, configuration examples, and supported benchmarks.
