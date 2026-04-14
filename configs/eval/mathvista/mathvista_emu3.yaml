@@ -11,9 +11,8 @@ inference:
     device: cuda:0
     torch_dtype: bfloat16
     attn_implementation: flash_attention_2
-  request:
-    task: understanding
-    params:
+
+    generation_cfg:
       max_new_tokens: 1024
 
 mathvista:
@@ -26,5 +25,5 @@ mathvista:
   out_dir: output/mathvista/emu3
   score_output_path: output/mathvista/emu3/summary.json
   llm_extract:
-    model_path: ${UMM_MODEL_CACHE}/evaluator/Qwen3-32B
-    max_new_tokens: 256
+    model_path: ${UMM_MODEL_CACHE}/evaluator/Qwen3-32B-AWQ
+    max_new_tokens: 2048

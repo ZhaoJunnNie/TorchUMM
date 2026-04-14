@@ -48,7 +48,7 @@ class JanusFlowBackbone:
             "img_size": 384,
         }
         self.default_understanding_cfg: dict[str, Any] = {
-            "max_new_tokens": 512,
+            "max_new_tokens": 5120,
             "do_sample": False,
             "use_cache": True,
         }

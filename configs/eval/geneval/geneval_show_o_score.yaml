@@ -24,5 +24,3 @@ inference:
   backbone: show_o
   backbone_cfg:
     show_o_root: ${UMM_CODEBASE}/model/Show-o
-  request:
-    params: {}

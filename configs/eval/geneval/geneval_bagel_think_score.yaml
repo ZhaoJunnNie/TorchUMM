@@ -23,5 +23,3 @@ geneval:
 inference:
   backbone: bagel
   backbone_cfg: {}
-  request:
-    params: {}

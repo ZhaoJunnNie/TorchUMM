@@ -27,5 +27,3 @@ inference:
       cfg_text_scale: 4.0
       cfg_img_scale: 1.0
       num_timesteps: 50
-  request:
-    params: {}

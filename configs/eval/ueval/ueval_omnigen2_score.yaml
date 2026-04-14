@@ -4,15 +4,10 @@ eval:
 inference:
   backbone: omnigen2
   backbone_cfg: {}
-  request:
-    params:
-      max_new_tokens: 512
-      num_inference_steps: 50
-      text_guidance_scale: 4.0
 
 ueval:
   mode: score
-  hf_dataset: primerL/UEval-all
+  hf_dataset: zlab-princeton/UEval
   domains: all
   out_dir: output/ueval/omnigen2
   max_samples: 0

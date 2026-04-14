@@ -11,14 +11,9 @@ inference:
     seed: 42
     torch_dtype: bfloat16
     understanding_cfg:
-      max_new_tokens: 100
-      top_k: 1
-      temperature: 0.8
+      max_new_tokens: 300
+      do_sample: false
       use_clip_vit: true
-  request:
-    task: understanding
-    params:
-      max_new_tokens: 20
 
 mathvista:
   mode: generate
@@ -30,5 +25,5 @@ mathvista:
   out_dir: output/mathvista/show_o2_1_5b
   score_output_path: output/mathvista/show_o2_1_5b/summary.json
   llm_extract:
-    model_path: ${UMM_MODEL_CACHE}/evaluator/Qwen3-32B
-    max_new_tokens: 256
+    model_path: ${UMM_MODEL_CACHE}/evaluator/Qwen3-32B-AWQ
+    max_new_tokens: 2048

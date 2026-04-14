@@ -17,5 +17,3 @@ gedit:
 inference:
   backbone: ovis_u1
   backbone_cfg: {}
-  request:
-    params: {}

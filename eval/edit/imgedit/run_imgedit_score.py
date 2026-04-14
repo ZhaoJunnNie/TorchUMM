@@ -72,6 +72,7 @@ def score_singleturn(model, args, benchmark_data: Path, edited_images_dir: Path,
         items = edit_data
 
     to_score = {k: v for k, v in items.items() if k not in results}
+    print(f"[singleturn score] edited_images_dir={edited_images_dir}", flush=True)
     print(f"[singleturn score] total={len(items)}, to_score={len(to_score)}, done={len(items)-len(to_score)}", flush=True)
 
     for key, item in tqdm(to_score.items(), desc="[singleturn score]"):
@@ -156,20 +157,39 @@ def score_multiturn(model, benchmark_data: Path, edited_images_dir: Path,
 
     multiturn_root = origin_img_root / "multiturn"
 
+    if not multiturn_root.is_dir():
+        print(f"[multiturn score] ERROR: multiturn root not found: {multiturn_root}", flush=True)
+        print(f"[multiturn score] hint: run `modal run modal/download.py --dataset imgedit` to download", flush=True)
+        return
+
     result_path = save_dir / "result.json"
     results = {}
     if result_path.is_file():
         with open(result_path, "r", encoding="utf-8") as f:
             results = json.load(f)
 
+    print(f"[multiturn score] edited_images_dir={edited_images_dir}", flush=True)
+    print(f"[multiturn score] multiturn_root={multiturn_root}", flush=True)
+    print(f"[multiturn score] resumed {len(results)} existing results", flush=True)
+
     for category in _MULTITURN_CATEGORIES:
         cat_dir = multiturn_root / category
         ann_path = cat_dir / "annotation.json"
         if not ann_path.is_file():
+            print(f"[multiturn score] WARNING: annotation not found: {ann_path}, skipping {category}", flush=True)
             continue
 
         items = _load_jsonl(ann_path)
         mt_images_dir = edited_images_dir / f"multiturn_{category}"
+
+        n_origin_missing = 0
+        n_turn_missing = 0
+        n_scored = 0
+        n_skipped = 0
+
+        if not mt_images_dir.is_dir():
+            print(f"[multiturn score] WARNING: edited images dir not found: {mt_images_dir}, skipping {category}", flush=True)
+            continue
 
         for item in tqdm(items, desc=f"[multiturn score] {category}"):
             img_id = item["id"]
@@ -177,6 +197,7 @@ def score_multiturn(model, benchmark_data: Path, edited_images_dir: Path,
             origin_path = cat_dir / img_id
 
             if not origin_path.is_file():
+                n_origin_missing += 1
                 continue
 
             # Collect turns
@@ -196,18 +217,28 @@ def score_multiturn(model, benchmark_data: Path, edited_images_dir: Path,
                     turn_output = mt_images_dir / f"{base_name}_turn{turn_idx}.png"
                     if turn_output.is_file():
                         prev_image_path = str(turn_output)
+                    n_skipped += 1
                     continue
 
                 turn_output = mt_images_dir / f"{base_name}_turn{turn_idx}.png"
                 if not turn_output.is_file():
+                    n_turn_missing += 1
                     break  # Cannot score subsequent turns
 
                 full_prompt = uge_prompt_template.replace("<edit_prompt>", turn_prompt)
                 response = _score_pair(model, full_prompt, prev_image_path, str(turn_output))
                 if response is not None:
                     results[result_key] = response
+                    n_scored += 1
 
                 prev_image_path = str(turn_output)
+
+        print(
+            f"[multiturn score] {category}: items={len(items)}, scored={n_scored}, "
+            f"skipped(done)={n_skipped}, origin_missing={n_origin_missing}, "
+            f"turn_img_missing={n_turn_missing}",
+            flush=True,
+        )
 
         # Save after each category
         with open(result_path, "w", encoding="utf-8") as f:

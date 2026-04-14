@@ -29,6 +29,3 @@ inference:
       image_token_num_per_image: 576
       img_size: 384
       patch_size: 16
-  request:
-    params:
-      parallel_size: 4

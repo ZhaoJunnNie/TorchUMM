@@ -12,12 +12,13 @@ inference:
     gpu_memory_utilization: 0.7
     classifier_free_guidance: 2.0
     image_area: 518400
-  request:
-    task: understanding
-    params:
+
+    generation_cfg:
       classifier_free_guidance: 2.0
-      image_area: 518400
       max_new_tokens: 64
+
+    understanding_cfg:
+      image_area: 518400
 
 mmmu:
   root: MMMU/MMMU

@@ -12,5 +12,5 @@ mathvista:
   out_dir: output/mathvista/mmada
   score_output_path: output/mathvista/mmada/summary.json
   llm_extract:
-    model_path: ${UMM_MODEL_CACHE}/evaluator/Qwen3-32B
-    max_new_tokens: 256
+    model_path: ${UMM_MODEL_CACHE}/evaluator/Qwen3-32B-AWQ
+    max_new_tokens: 2048

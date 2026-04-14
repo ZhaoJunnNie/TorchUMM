@@ -28,5 +28,3 @@ inference:
       width: 1024
       num_steps: 50
       txt_cfg: 5.0
-  request:
-    params: {}

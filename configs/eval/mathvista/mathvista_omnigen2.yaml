@@ -11,13 +11,12 @@ inference:
     torch_dtype: bfloat16
     enable_cpu_offload: false
     enable_sequential_cpu_offload: false
-    output_dir_understanding: output/omnigen2_understanding
-  request:
-    task: understanding
-    params:
+    generation_cfg:
       num_inference_steps: 50
       seed: 42
-      max_new_tokens: 20
+
+    understanding_cfg:
+      max_new_tokens: 2048
 
 mathvista:
   mode: generate
@@ -29,5 +28,5 @@ mathvista:
   out_dir: output/mathvista/omnigen2
   score_output_path: output/mathvista/omnigen2/summary.json
   llm_extract:
-    model_path: ${UMM_MODEL_CACHE}/evaluator/Qwen3-32B
-    max_new_tokens: 256
+    model_path: ${UMM_MODEL_CACHE}/evaluator/Qwen3-32B-AWQ
+    max_new_tokens: 2048

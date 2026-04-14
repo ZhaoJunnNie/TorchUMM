@@ -23,5 +23,3 @@ geneval:
 inference:
   backbone: tokenflow
   backbone_cfg: {}
-  request:
-    params: {}

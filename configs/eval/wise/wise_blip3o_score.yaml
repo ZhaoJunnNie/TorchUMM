@@ -18,5 +18,3 @@ wise:
 inference:
   backbone: blip3o
   backbone_cfg: {}
-  request:
-    params: {}

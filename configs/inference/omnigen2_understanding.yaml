@@ -7,7 +7,6 @@ inference:
     torch_dtype: bfloat16
     enable_cpu_offload: false
     enable_sequential_cpu_offload: false
-    output_dir_understanding: output/omnigen2_understanding
 
   request:
     task: understanding

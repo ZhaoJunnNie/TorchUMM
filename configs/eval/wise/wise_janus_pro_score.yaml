@@ -18,6 +18,3 @@ wise:
 inference:
   backbone: janus_pro
   backbone_cfg: {}
-  request:
-    params:
-      parallel_size: 4

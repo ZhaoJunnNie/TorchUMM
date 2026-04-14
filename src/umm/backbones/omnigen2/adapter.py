@@ -39,12 +39,25 @@ class OmniGen2Backbone:
 
         # Output directories
         self.out_dir_t2i = Path(kwargs.get("output_dir_t2i", "output/omnigen2_images"))
-        self.out_dir_understanding = Path(kwargs.get("output_dir_understanding", "output/omnigen2_understanding"))
         self.out_dir_editing = Path(kwargs.get("output_dir_editing", "output/omnigen2_editing"))
 
         self.out_dir_t2i.mkdir(parents=True, exist_ok=True)
-        self.out_dir_understanding.mkdir(parents=True, exist_ok=True)
         self.out_dir_editing.mkdir(parents=True, exist_ok=True)
+
+        self.default_generation_cfg: dict[str, Any] = {
+            "height": 1024,
+            "width": 1024,
+            "num_inference_steps": 50,
+            "text_guidance_scale": 4.0,
+            "negative_prompt": "",
+            "num_images_per_prompt": 1,
+            "seed": 0,
+        }
+        self.default_understanding_cfg: dict[str, Any] = {
+            "max_new_tokens": 5120,
+            "seed": 0,
+            "do_sample": False,
+        }
 
         # Lazy-loaded pipelines (share components to avoid OOM)
         self.pipeline = None       # OmniGen2Pipeline (t2i + edit)
@@ -206,9 +219,6 @@ class OmniGen2Backbone:
         if "output_dir_t2i" in cfg:
             self.out_dir_t2i = self._resolve_output_dir(str(cfg["output_dir_t2i"]))
             self.out_dir_t2i.mkdir(parents=True, exist_ok=True)
-        if "output_dir_understanding" in cfg:
-            self.out_dir_understanding = self._resolve_output_dir(str(cfg["output_dir_understanding"]))
-            self.out_dir_understanding.mkdir(parents=True, exist_ok=True)
         if "output_dir_editing" in cfg:
             self.out_dir_editing = self._resolve_output_dir(str(cfg["output_dir_editing"]))
             self.out_dir_editing.mkdir(parents=True, exist_ok=True)
@@ -216,6 +226,12 @@ class OmniGen2Backbone:
             self.omnigen2_root = Path(cfg["omnigen2_root"]).expanduser()
             self._modules_registered = False
             changed = True
+        generation_cfg = cfg.get("generation_cfg")
+        if isinstance(generation_cfg, dict):
+            self.default_generation_cfg.update(generation_cfg)
+        understanding_cfg = cfg.get("understanding_cfg")
+        if isinstance(understanding_cfg, dict):
+            self.default_understanding_cfg.update(understanding_cfg)
         # Reset pipelines if model config changed
         if changed:
             self.pipeline = None
@@ -243,20 +259,34 @@ class OmniGen2Backbone:
 
         self._ensure_pipeline()
 
-        height = gen_cfg.get("height", 1024)
-        width = gen_cfg.get("width", 1024)
-        num_inference_steps = gen_cfg.get("num_inference_steps", 50)
-        text_guidance_scale = gen_cfg.get("text_guidance_scale", 4.0)
-        negative_prompt = gen_cfg.get("negative_prompt", "")
-        num_images_per_prompt = gen_cfg.get("num_images_per_prompt", 1)
-        seed = gen_cfg.get("seed", 0)
+        cfg = dict(self.default_generation_cfg)
+        if gen_cfg:
+            cfg.update(gen_cfg)
+        height = cfg.get("height", 1024)
+        width = cfg.get("width", 1024)
+        num_inference_steps = cfg.get("num_inference_steps", 50)
+        text_guidance_scale = cfg.get("text_guidance_scale", 4.0)
+        negative_prompt = cfg.get("negative_prompt", "")
+        num_images_per_prompt = cfg.get("num_images_per_prompt", 1)
+        seed = cfg.get("seed", 0)
 
         results: dict[str, Any] = {"image_paths": []}
         images_pil: list[Image.Image] = []
         out_dir = self.out_dir_t2i.resolve()
         out_dir.mkdir(parents=True, exist_ok=True)
 
+        # Truncate prompts to fit diffusion transformer's rotary embedding limit
+        # axes_lens[0]=1024 from model config; _apply_chat_template adds ~35 tokens
+        # of system/user/assistant markup, so truncate raw prompt to 950 for margin
+        self._ensure_chat_pipeline()
+        tokenizer = self.chat_pipeline.processor.tokenizer
+
         for prompt_idx, prompt in enumerate(prompts):
+            token_ids = tokenizer.encode(prompt, add_special_tokens=False)
+            if len(token_ids) > 950:
+                print(f"  Truncating prompt from {len(token_ids)} to 950 tokens")
+                token_ids = token_ids[:950]
+                prompt = tokenizer.decode(token_ids, skip_special_tokens=True)
             print(f"Generating image {prompt_idx + 1}/{len(prompts)}: {prompt[:80]}...")
             try:
                 generator = torch.Generator(device="cpu").manual_seed(seed + prompt_idx)
@@ -307,7 +337,11 @@ class OmniGen2Backbone:
         self,
         instruction: str,
         input_images: list[Image.Image],
-        max_new_tokens: int = 512,
+        max_new_tokens: int = 5120,
+        do_sample: bool = False,
+        temperature: float = 1.0,
+        top_p: float = 1.0,
+        repetition_penalty: float = 1.0,
     ) -> str:
         """Call mllm.generate directly with a text-focused system prompt.
 
@@ -323,25 +357,35 @@ class OmniGen2Backbone:
         # Use a text-analysis-focused system prompt instead of image-generation one
         prompt = (
             "<|im_start|>system\n"
-            "You are a helpful assistant that analyzes images and provides "
-            "detailed text descriptions and reasoning. "
-            "Respond with text only. Do not generate images.<|im_end|>\n"
+            "You are a helpful assistant that provides detailed text descriptions "
+            "and step-by-step reasoning. Respond with plain text only. "
+            "Do not generate images. Do not use ASCII art, diagrams, or any "
+            "visual representations. Describe everything in words.<|im_end|>\n"
             f"<|im_start|>user\n{img_tags}{instruction}<|im_end|>\n"
             "<|im_start|>assistant\n"
         )
 
         cp = self.chat_pipeline
+        # Qwen-VL processor expects None (not []) when there are no images
+        imgs_for_processor = input_images if input_images else None
         inputs = cp.prepare_inputs_for_text_generation(
-            prompt, input_images, cp.mllm.device
+            prompt, imgs_for_processor, cp.mllm.device
         )
-        generated_ids = cp.mllm.generate(
+        generate_kwargs: dict[str, Any] = {
             **inputs,
-            tokenizer=cp.processor.tokenizer,
-            max_new_tokens=max_new_tokens,
+            "tokenizer": cp.processor.tokenizer,
+            "max_new_tokens": max_new_tokens,
+            "do_sample": do_sample,
+            "temperature": temperature if do_sample else 1.0,
             # Do NOT include <|img|> as stop string — if the model outputs it,
             # subsequent tokens may still contain useful reasoning text.
-            stop_strings=["<|im_end|>", "<|endoftext|>"],
-        )
+            "stop_strings": ["<|im_end|>", "<|endoftext|>"],
+        }
+        if do_sample and top_p < 1.0:
+            generate_kwargs["top_p"] = top_p
+        if repetition_penalty != 1.0:
+            generate_kwargs["repetition_penalty"] = repetition_penalty
+        generated_ids = cp.mllm.generate(**generate_kwargs)
         generated_ids_trimmed = [
             out_ids[len(in_ids):]
             for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
@@ -367,6 +411,10 @@ class OmniGen2Backbone:
         Returns:
             {"understandings": [{"image_path": str, "instruction": str, "response": str}, ...]}
         """
+        und_cfg = dict(self.default_understanding_cfg)
+        if understanding_cfg:
+            und_cfg.update(understanding_cfg)
+
         items = self._to_items(batch)
 
         # Extract all images from the batch (supports both paths and PIL objects)
@@ -394,33 +442,37 @@ class OmniGen2Backbone:
                         seen_paths.add(img)
             instruction = first.get("prompt", "")
 
-        # Fallback to understanding_cfg
+        # Fallback to und_cfg
         if not input_images_pil:
-            cfg_path = understanding_cfg.get("image_path")
+            cfg_path = und_cfg.get("image_path")
             if cfg_path:
                 input_images_pil.append(Image.open(cfg_path).convert("RGB"))
                 image_path_labels.append(cfg_path)
         if not instruction:
-            instruction = understanding_cfg.get("instruction") or "Please describe this image briefly."
-
-        if not input_images_pil:
-            raise ValueError("Understanding requires at least one image (in request.images or params.image_path).")
+            instruction = und_cfg.get("instruction") or "Please describe this image briefly."
 
         self._ensure_chat_pipeline()
 
-        max_new_tokens = understanding_cfg.get("max_new_tokens", 512)
-        seed = understanding_cfg.get("seed", 0)
+        max_new_tokens = und_cfg.get("max_new_tokens", 5120)
+        seed = und_cfg.get("seed", 0)
+        do_sample = bool(und_cfg.get("do_sample", False))
+        temperature = float(und_cfg.get("temperature", 1.0))
+        top_p = float(und_cfg.get("top_p", 1.0))
+        repetition_penalty = float(und_cfg.get("repetition_penalty", 1.0))
 
         results: dict[str, Any] = {"understandings": []}
 
-        print(f"Understanding with {len(input_images_pil)} image(s): {instruction[:80]}...")
+        n_imgs = len(input_images_pil)
+        print(f"Understanding with {n_imgs} image(s): {instruction[:80]}...")
         try:
             torch.manual_seed(seed)
             response = self._generate_text_only(
                 instruction, input_images_pil, max_new_tokens=max_new_tokens,
+                do_sample=do_sample, temperature=temperature,
+                top_p=top_p, repetition_penalty=repetition_penalty,
             )
             results["understandings"].append({
-                "image_path": image_path_labels[0],
+                "image_path": image_path_labels[0] if image_path_labels else "",
                 "all_image_paths": image_path_labels,
                 "instruction": instruction,
                 "response": response,
@@ -429,7 +481,7 @@ class OmniGen2Backbone:
         except Exception as e:
             print(f"  Error: {e}")
             results["understandings"].append({
-                "image_path": image_path_labels[0],
+                "image_path": image_path_labels[0] if image_path_labels else "",
                 "all_image_paths": image_path_labels,
                 "instruction": instruction,
                 "error": str(e),

@@ -5,10 +5,9 @@ inference:
   backbone: ovis_u1
   backbone_cfg:
     model_path: ${UMM_MODEL_CACHE}/ovis_u1/Ovis-U1-3B
-  request:
-    task: understanding
-    params:
-      max_new_tokens: 4096
+
+    understanding_cfg:
+      max_new_tokens: 2048
       do_sample: false
 
 mathvista:
@@ -21,5 +20,5 @@ mathvista:
   out_dir: output/mathvista/ovis_u1
   score_output_path: output/mathvista/ovis_u1/summary.json
   llm_extract:
-    model_path: ${UMM_MODEL_CACHE}/evaluator/Qwen3-32B
-    max_new_tokens: 256
+    model_path: ${UMM_MODEL_CACHE}/evaluator/Qwen3-32B-AWQ
+    max_new_tokens: 2048

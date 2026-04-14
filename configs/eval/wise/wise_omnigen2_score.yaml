@@ -18,8 +18,3 @@ wise:
 inference:
   backbone: omnigen2
   backbone_cfg: {}
-  request:
-    params:
-      num_inference_steps: 50
-      text_guidance_scale: 4.0
-      seed: 42

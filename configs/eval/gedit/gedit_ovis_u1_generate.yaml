@@ -23,5 +23,3 @@ inference:
       num_steps: 50
       txt_cfg: 6.0
       img_cfg: 1.5
-  request:
-    params: {}

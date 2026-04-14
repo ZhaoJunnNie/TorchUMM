@@ -9,14 +9,9 @@ inference:
     seed: 42
     torch_dtype: bfloat16
     understanding_cfg:
-      max_new_tokens: 512
+      max_new_tokens: 2048
       do_sample: false
       use_cache: true
-  request:
-    task: understanding
-    params:
-      max_new_tokens: 20
-      do_sample: false
 
 mmbench:
   datasets: [mmbench_dev_20230712]

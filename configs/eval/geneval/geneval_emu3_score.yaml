@@ -23,7 +23,3 @@ geneval:
 inference:
   backbone: emu3
   backbone_cfg: {}
-  request:
-    params:
-      max_new_tokens: 40960
-      classifier_free_guidance: 3.0

@@ -19,5 +19,3 @@ inference:
   backbone: mmada
   backbone_cfg:
     mmada_root: ${UMM_CODEBASE}/model/MMaDA
-  request:
-    params: {}

@@ -85,12 +85,16 @@ def stats_singleturn(scores_dir: Path, benchmark_data: Path) -> None:
             type_scores[etype].append(score)
     type_avg = {t: round(sum(s) / len(s), 2) for t, s in type_scores.items() if s}
 
+    # Overall = average across all samples (weighted by per-type count)
+    if avg_scores:
+        type_avg["overall"] = round(sum(avg_scores.values()) / len(avg_scores), 2)
+
     type_path = scores_dir / "typescore.json"
     with open(type_path, "w", encoding="utf-8") as f:
         json.dump(type_avg, f, indent=2, ensure_ascii=False)
 
     _print_table("Singleturn per-type scores", type_avg,
-                 count_fn=lambda t: len(type_scores[t]))
+                 count_fn=lambda t: len(type_scores[t]) if t != "overall" else 0)
     print(f"[singleturn stats] saved: {avg_path}, {type_path}", flush=True)
 
 
@@ -119,7 +123,12 @@ def stats_uge(scores_dir: Path) -> None:
 
     if scores:
         overall = round(sum(scores.values()) / len(scores), 2)
-        print(f"\n[uge stats] UGE overall: {overall:.2f} ({len(scores)} items)", flush=True)
+        scores["overall"] = overall
+        print(f"\n[uge stats] UGE overall: {overall:.2f} ({len(scores) - 1} items)", flush=True)
+
+    # Re-save with overall included
+    with open(avg_path, "w", encoding="utf-8") as f:
+        json.dump(scores, f, indent=2, ensure_ascii=False)
     print(f"[uge stats] saved: {avg_path}", flush=True)
 
 
@@ -156,12 +165,18 @@ def stats_multiturn(scores_dir: Path) -> None:
 
     cat_avg = {c: round(sum(s) / len(s), 2) for c, s in cat_scores.items() if s}
 
+    # Overall = weighted average across all turns
+    total_score = sum(cat_avg[c] * len(cat_scores[c]) for c in cat_avg)
+    total_count = sum(len(cat_scores[c]) for c in cat_avg)
+    if total_count > 0:
+        cat_avg["overall"] = round(total_score / total_count, 2)
+
     avg_path = scores_dir / "category_score.json"
     with open(avg_path, "w", encoding="utf-8") as f:
         json.dump(cat_avg, f, indent=2, ensure_ascii=False)
 
     _print_table("Multiturn per-category scores", cat_avg,
-                 count_fn=lambda c: len(cat_scores[c]))
+                 count_fn=lambda c: len(cat_scores[c]) if c != "overall" else 0)
     print(f"[multiturn stats] saved: {avg_path}", flush=True)
 
 

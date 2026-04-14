@@ -1,6 +1,5 @@
 eval:
   benchmark: geneval
-
 geneval:
   geneval_root: ${UMM_CODEBASE}/model/geneval
   metadata_path: ${UMM_CODEBASE}/model/geneval/prompts/evaluation_metadata.jsonl
@@ -26,8 +25,7 @@ inference:
     omnigen2_root: ${UMM_CODEBASE}/model/OmniGen2
     device: "cuda:0"
     torch_dtype: bfloat16
-  request:
-    params:
+    generation_cfg:
       num_inference_steps: 50
       text_guidance_scale: 4.0
       seed: 42

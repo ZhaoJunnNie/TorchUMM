@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import importlib
+import random
 import signal
 import sys
 from pathlib import Path
 from typing import Any, Optional
 
+import numpy as np
 import torch
 from PIL import Image
 
@@ -28,13 +30,25 @@ class Emu3Backbone:
     ) -> None:
         repo_root = Path(__file__).resolve().parents[4]
         packaged = Path(__file__).resolve().parent / "Emu3"
-        self.emu_root = packaged if packaged.exists() else repo_root / "model" / "emu3" / "Emu3"
+        self.emu_root = packaged if packaged.exists() else repo_root / "model" / "Emu3"
         self.model_path = model_path or str(repo_root / "model_cache" / "emu3" / "models" / "emu3_gen")
         self.vq_hub = vq_hub or str(repo_root / "model_cache" / "emu3" / "models" / "emu3_vision_tokenizer")
         self.device = device or "cuda:0"
         self.device_map = device_map or "cuda:0"
         self.torch_dtype = torch_dtype
         self.attn_implementation = attn_implementation
+        self.seed = 42
+
+        self.default_generation_cfg: dict[str, Any] = {
+            "max_new_tokens": 40960,
+            "classifier_free_guidance": 3.0,
+            "do_sample": True,
+            "top_k": 2048,
+        }
+        self.default_understanding_cfg: dict[str, Any] = {
+            "max_new_tokens": 5120,
+            "do_sample": False,
+        }
 
         # Lazily populated by load()
         self.model: Any = None
@@ -56,6 +70,16 @@ class Emu3Backbone:
             self.torch_dtype = cfg["torch_dtype"]
         if isinstance(cfg.get("attn_implementation"), str):
             self.attn_implementation = cfg["attn_implementation"]
+        if cfg.get("seed") is not None:
+            self.seed = int(cfg["seed"])
+        generation_cfg = cfg.get("generation_cfg")
+        if isinstance(generation_cfg, dict):
+            self.default_generation_cfg.update(generation_cfg)
+        understanding_cfg = cfg.get("understanding_cfg")
+        if isinstance(understanding_cfg, dict):
+            self.default_understanding_cfg.update(understanding_cfg)
+
+        self._set_seed(self.seed)
 
         # Add Emu3 repo to sys.path so `emu3.*` is importable
         emu_root_str = str(self.emu_root.resolve())
@@ -196,29 +220,33 @@ class Emu3Backbone:
             UnbatchedClassifierFreeGuidanceLogitsProcessor,
         )
 
-        positive_prompt = gen_cfg.get("positive_prompt", " masterpiece, film grained, best quality.")
-        negative_prompt = gen_cfg.get(
+        cfg = dict(self.default_generation_cfg)
+        if gen_cfg:
+            cfg.update(gen_cfg)
+
+        positive_prompt = cfg.get("positive_prompt", " masterpiece, film grained, best quality.")
+        negative_prompt = cfg.get(
             "negative_prompt",
             "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, "
             "fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, "
             "signature, watermark, username, blurry.",
         )
-        cfg_scale = float(gen_cfg.get("classifier_free_guidance", 3.0))
+        cfg_scale = float(cfg.get("classifier_free_guidance", 3.0))
 
         generation_config = GenerationConfig(
             use_cache=True,
             eos_token_id=self.model.config.eos_token_id,
             pad_token_id=self.model.config.pad_token_id,
-            max_new_tokens=int(gen_cfg.get("max_new_tokens", 40960)),
-            do_sample=bool(gen_cfg.get("do_sample", True)),
-            top_k=int(gen_cfg.get("top_k", 2048)),
+            max_new_tokens=int(cfg.get("max_new_tokens", 40960)),
+            do_sample=bool(cfg.get("do_sample", True)),
+            top_k=int(cfg.get("top_k", 2048)),
         )
 
         full_prompt = prompt + positive_prompt
         kwargs = dict(
             mode="G",
-            ratio=gen_cfg.get("ratio", "1:1"),
-            image_area=int(gen_cfg.get("image_area", self.model.config.image_area)),
+            ratio=cfg.get("ratio", "1:1"),
+            image_area=int(cfg.get("image_area", self.model.config.image_area)),
             return_tensors="pt",
             padding="longest",
         )
@@ -304,9 +332,25 @@ class Emu3Backbone:
         """Run understanding on a single image+prompt and return the text response."""
         from transformers.generation.configuration_utils import GenerationConfig
 
+        und_cfg = dict(self.default_understanding_cfg)
+        if cfg:
+            und_cfg.update(cfg)
+        cfg = und_cfg
+
         img = None
         if img_path:
             img = Image.open(img_path).convert("RGB")
+            # Clamp extreme aspect ratios to avoid smart_resize ValueError
+            max_ratio = 5.0
+            w, h = img.size
+            if max(w, h) / max(min(w, h), 1) > max_ratio:
+                if w > h:
+                    new_w = int(h * max_ratio)
+                    img = img.resize((new_w, h), Image.LANCZOS)
+                else:
+                    new_h = int(w * max_ratio)
+                    img = img.resize((w, new_h), Image.LANCZOS)
+                print(f"[emu3] Warning: resized {img_path} from {w}x{h} to {img.size[0]}x{img.size[1]} (aspect ratio > {max_ratio})", flush=True)
 
         inputs = self.processor(
             text=prompt, image=img, mode="U",
@@ -317,7 +361,8 @@ class Emu3Backbone:
             pad_token_id=self.tokenizer.pad_token_id,
             bos_token_id=self.tokenizer.bos_token_id,
             eos_token_id=self.tokenizer.eos_token_id,
-            max_new_tokens=int(cfg.get("max_new_tokens", 1024)),
+            max_new_tokens=int(cfg.get("max_new_tokens", 5120)),
+            do_sample=bool(cfg.get("do_sample", False)),
         )
 
         outputs = self.model.generate(
@@ -349,3 +394,14 @@ class Emu3Backbone:
         if lowered in {"fp32", "float32"}:
             return torch.float32
         return getattr(torch, dtype_name, torch.bfloat16)
+
+    @staticmethod
+    def _set_seed(seed: int) -> None:
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(seed)
+            torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False

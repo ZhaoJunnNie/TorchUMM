@@ -6,8 +6,8 @@ inference:
     vae_path: ${UMM_MODEL_CACHE}/show_o2/Wan2.1_VAE.pth
     seed: 42
     torch_dtype: bfloat16
-  request:
-    params:
+
+    generation_cfg:
       guidance_scale: 3.0
       generation_timesteps: 50
       batch_size: 1

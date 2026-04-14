@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+import sys
 import time
 from io import BytesIO
 from pathlib import Path
@@ -9,6 +11,7 @@ from typing import Any
 
 import pandas as pd
 from PIL import Image
+from tqdm import tqdm
 
 from umm.core.config import load_config
 from umm.inference import InferencePipeline
@@ -84,6 +87,14 @@ def _extract_text(output: Any) -> str:
                 text = _extract_text(item)
                 if text:
                     return text
+        # Handle adapters that return {"understandings": [{"response": "..."}]}
+        for list_key in ("understandings",):
+            container = output.get(list_key)
+            if isinstance(container, list):
+                for item in container:
+                    text = _extract_text(item)
+                    if text:
+                        return text
     if isinstance(output, list):
         for item in output:
             text = _extract_text(item)
@@ -220,27 +231,57 @@ def run_mmbench_eval_command(args: Any) -> int:
         language = str(entry.get("language", "en"))
         df = pd.read_csv(dataset_path, sep="\t")
 
-        outputs = []
+        # Resume: load checkpoint JSONL if exists
+        checkpoint_jsonl = out_dir / f"{ds_name}_checkpoint.jsonl"
+        outputs: list[dict[str, Any]] = []
+        done_indices: set[int] = set()
+
         if resume:
-            jsonl_path: Path | None = None
-            if isinstance(resume_jsonl, str) and resume_jsonl:
-                jsonl_path = _resolve_path(resume_jsonl, repo_root)
-            else:
-                candidates = sorted(out_dir.glob(f"{ds_name}_*.jsonl"))
-                if candidates:
-                    jsonl_path = max(candidates, key=lambda p: p.stat().st_mtime)
-            if jsonl_path and jsonl_path.exists():
-                with jsonl_path.open("r", encoding="utf-8") as reader:
+            # Try checkpoint first
+            if checkpoint_jsonl.exists():
+                with checkpoint_jsonl.open("r", encoding="utf-8") as reader:
                     for line in reader:
                         line = line.strip()
                         if not line:
                             continue
-                        outputs.append(json.loads(line))
-                print(f"[umm eval] resume enabled: loaded {len(outputs)} rows from {jsonl_path}")
+                        item = json.loads(line)
+                        outputs.append(item)
+                        done_indices.add(int(item["index"]))
+                print(f"[mmbench] resume from checkpoint: {len(outputs)} done", flush=True)
+            else:
+                # Fall back to completed JSONL
+                jsonl_path: Path | None = None
+                if isinstance(resume_jsonl, str) and resume_jsonl:
+                    jsonl_path = _resolve_path(resume_jsonl, repo_root)
+                else:
+                    candidates = sorted(out_dir.glob(f"{ds_name}_*.jsonl"))
+                    candidates = [c for c in candidates if "_checkpoint" not in c.name]
+                    if candidates:
+                        jsonl_path = max(candidates, key=lambda p: p.stat().st_mtime)
+                if jsonl_path and jsonl_path.exists():
+                    with jsonl_path.open("r", encoding="utf-8") as reader:
+                        for line in reader:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            item = json.loads(line)
+                            outputs.append(item)
+                            done_indices.add(int(item["index"]))
+                    print(f"[mmbench] resume from {jsonl_path}: {len(outputs)} done", flush=True)
 
-        if not outputs:
-            for idx, row in df.iterrows():
-                image_path = _decode_image(str(row["image"]), image_dir, row_index=int(row["index"]))
+        print(
+            f"[mmbench] {ds_name}: {len(df)} total, {len(done_indices)} done, "
+            f"{len(df) - len(done_indices)} remaining",
+            flush=True,
+        )
+
+        with checkpoint_jsonl.open("a", encoding="utf-8") as ckpt_writer:
+            for idx, row in tqdm(df.iterrows(), total=len(df), desc=f"mmbench/{ds_name}", file=sys.stdout):
+                row_index = int(row["index"])
+                if row_index in done_indices:
+                    continue
+
+                image_path = _decode_image(str(row["image"]), image_dir, row_index=row_index)
 
                 options = {}
                 for cand in ["A", "B", "C", "D", "E"]:
@@ -258,18 +299,21 @@ def run_mmbench_eval_command(args: Any) -> int:
                     "prompt": question,
                     "images": [image_path],
                     "params": request_params,
-                    "metadata": {"index": int(row["index"]), "dataset": ds_name},
+                    "metadata": {"index": row_index, "dataset": ds_name},
                 }
                 response = _extract_text(pipeline.run(payload))
                 pred = _post_process(response, options)
-                outputs.append(
-                    {
-                        "question": question,
-                        "answer": pred,
-                        "gt_answers": row["answer"] if "answer" in row else None,
-                        "index": int(row["index"]),
-                    }
-                )
+                item = {
+                    "question": question,
+                    "answer": pred,
+                    "gt_answers": row["answer"] if "answer" in row else None,
+                    "index": row_index,
+                }
+                outputs.append(item)
+                done_indices.add(row_index)
+                ckpt_writer.write(json.dumps(item) + "\n")
+                ckpt_writer.flush()
+                os.fsync(ckpt_writer.fileno())
 
                 if max_samples > 0 and len(outputs) >= max_samples:
                     break
@@ -277,7 +321,7 @@ def run_mmbench_eval_command(args: Any) -> int:
         time_prefix = time.strftime("%y%m%d%H%M%S", time.localtime())
         results_file = f"{ds_name}_{time_prefix}.xlsx"
         output_path = out_dir / results_file
-        jsonl_path = out_dir / f"{ds_name}_{time_prefix}.jsonl"
+        jsonl_path_out = out_dir / f"{ds_name}_{time_prefix}.jsonl"
 
         cur_df = df.copy()
         if "mmbench" in ds_name:
@@ -291,11 +335,16 @@ def run_mmbench_eval_command(args: Any) -> int:
             cur_df.loc[df["index"] == item["index"], "prediction"] = item["answer"]
 
         cur_df.to_excel(output_path, index=False, engine="openpyxl")
-        with jsonl_path.open("w", encoding="utf-8") as writer:
+        with jsonl_path_out.open("w", encoding="utf-8") as writer:
             for item in outputs:
                 writer.write(json.dumps(item) + "\n")
+
+        # Clean up checkpoint after successful completion
+        if checkpoint_jsonl.exists():
+            checkpoint_jsonl.unlink()
+
         summary[f"{ds_name}_output_path"] = str(output_path)
-        summary[f"{ds_name}_output_jsonl"] = str(jsonl_path)
+        summary[f"{ds_name}_output_jsonl"] = str(jsonl_path_out)
 
     if isinstance(score_output_path, str) and score_output_path:
         score_path = _resolve_path(score_output_path, repo_root)

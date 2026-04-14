@@ -8,10 +8,9 @@ inference:
     mmada_root: ${UMM_CODEBASE}/model/MMaDA
     vq_model_path: ${UMM_MODEL_CACHE}/mmada/magvitv2
     seed: 42
-  request:
-    task: understanding
-    params:
-      max_new_tokens: 512
+
+    understanding_cfg:
+      max_new_tokens: 2048
       steps: 256
       block_length: 128
 

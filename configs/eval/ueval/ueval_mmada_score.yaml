@@ -5,12 +5,9 @@ inference:
   backbone: mmada
   backbone_cfg:
     mmada_root: ${UMM_CODEBASE}/model/MMaDA
-  request:
-    params: {}
-
 ueval:
   mode: score
-  hf_dataset: primerL/UEval-all
+  hf_dataset: zlab-princeton/UEval
   local_cache: ${UMM_DATASETS}/ueval/UEval
   domains: all
   out_dir: output/ueval/mmada

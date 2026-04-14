@@ -5,12 +5,9 @@ inference:
   backbone: show_o
   backbone_cfg:
     show_o_root: ${UMM_CODEBASE}/model/Show-o
-  request:
-    params: {}
-
 ueval:
   mode: score
-  hf_dataset: primerL/UEval-all
+  hf_dataset: zlab-princeton/UEval
   domains: all
   out_dir: output/ueval/show_o
   max_samples: 0

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -36,17 +37,18 @@ def _extract_text(output: Any) -> str:
             value = output.get(key)
             if isinstance(value, str):
                 return value
-        results = output.get("results")
-        if isinstance(results, dict):
-            for key in ("text", "answer", "response", "output"):
-                value = results.get(key)
-                if isinstance(value, str):
-                    return value
-        if isinstance(results, list):
-            for item in results:
-                text = _extract_text(item)
-                if text:
-                    return text
+        for container_key in ("results", "understandings"):
+            container = output.get(container_key)
+            if isinstance(container, dict):
+                for key in ("text", "answer", "response", "output"):
+                    value = container.get(key)
+                    if isinstance(value, str):
+                        return value
+            if isinstance(container, list):
+                for item in container:
+                    text = _extract_text(item)
+                    if text:
+                        return text
     if isinstance(output, list):
         for item in output:
             text = _extract_text(item)
@@ -59,6 +61,11 @@ def _post_process(response: str) -> str:
     response = response.replace("\n", "").replace("不是", "No").replace("是", "Yes").replace("否", "No")
     response = response.lower().replace("true", "yes").replace("false", "no")
     response = re.sub(re.compile(r"[\u4e00-\u9fa5]"), "", response)
+    # Extract first yes/no, discard repetitive garbage
+    response = response.strip()
+    match = re.match(r"^[^a-z]*(yes|no)\b", response)
+    if match:
+        return match.group(1)
     return response
 
 
@@ -133,14 +140,22 @@ def run_mme_eval_command(args: Any) -> int:
     for task_txt in txt_files:
         task_name = task_txt.stem
         out_file = out_dir / task_txt.name
-        with task_txt.open("r", encoding="utf-8") as fin, out_file.open("w", encoding="utf-8") as fout:
+
+        # Resume: count already-completed lines and skip them
+        existing_lines = 0
+        if out_file.exists():
+            existing_lines = sum(1 for ln in out_file.open("r", encoding="utf-8") if ln.strip())
+        if existing_lines > 0:
+            print(f"[mme] {task_name}: resuming after {existing_lines} existing lines", flush=True)
+
+        with task_txt.open("r", encoding="utf-8") as fin, out_file.open("a", encoding="utf-8") as fout:
+            done = 0
             for idx, line in enumerate(fin, start=1):
                 row = line.strip().split("\t")
                 if len(row) != 3:
                     skipped_rows += 1
                     continue
                 img, question, gt = row
-                prompt = f"{question} {prompt_suffix}".strip()
 
                 img_path = image_root / task_name / img
                 if not img_path.exists():
@@ -149,6 +164,12 @@ def run_mme_eval_command(args: Any) -> int:
                     missing_images += 1
                     continue
 
+                # Skip rows already written in a previous run
+                done += 1
+                if done <= existing_lines:
+                    continue
+
+                prompt = f"{question} {prompt_suffix}".strip()
                 payload = {
                     "backbone": backbone,
                     "task": "understanding",
@@ -156,9 +177,15 @@ def run_mme_eval_command(args: Any) -> int:
                     "images": [str(img_path)],
                     "params": request_params,
                 }
+                print(f"[mme] {task_name} | {idx}: {img} ... inferring", flush=True)
                 output = pipeline.run(payload)
                 response = _post_process(_extract_text(output))
+                if not response.strip():
+                    print(f"[mme] WARNING empty response: {task_name}/{img}", flush=True)
+                print(f"[mme] {task_name} | {idx}: {img} -> {response[:80]!r}", flush=True)
                 print(img, prompt, gt, response, sep="\t", file=fout)
+                fout.flush()
+                os.fsync(fout.fileno())
                 total_written += 1
                 if max_samples > 0 and idx >= max_samples:
                     break
@@ -170,7 +197,9 @@ def run_mme_eval_command(args: Any) -> int:
         "samples_written": total_written,
     }
 
-    if total_written == 0:
+    # Check if out_dir has any result files at all (including from previous runs)
+    has_results = any(p.suffix == ".txt" and p.stat().st_size > 0 for p in out_dir.iterdir()) if out_dir.exists() else False
+    if total_written == 0 and not has_results:
         print(
             "[umm eval] warning: no MME samples were written. "
             "Skipping calculation. Check `mme.root` and `mme.image_root`."

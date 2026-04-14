@@ -1,6 +1,5 @@
 eval:
   benchmark: geneval
-
 geneval:
   mode: generate  # full | generate | score
   metadata_path: ${UMM_CODEBASE}/model/geneval/prompts/evaluation_metadata.jsonl
@@ -28,8 +27,7 @@ inference:
     version: 1
     seed: 42
     torch_dtype: bfloat16
-  request:
-    params:
+    generation_cfg:
       guidance_scale: 3.0
       generation_timesteps: 50
       batch_size: 1

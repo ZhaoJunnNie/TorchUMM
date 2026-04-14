@@ -9,9 +9,8 @@ inference:
     max_mem_per_gpu: 80GiB
     offload_folder: ./tmp/offload
     seed: 42
-  request:
-    task: understanding
-    params:
+
+    understanding_cfg:
       max_think_token_n: 1000
       do_sample: false
 

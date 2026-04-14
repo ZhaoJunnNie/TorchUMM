@@ -11,13 +11,12 @@ inference:
     torch_dtype: bfloat16
     enable_cpu_offload: false
     enable_sequential_cpu_offload: false
-    output_dir_understanding: output/omnigen2_understanding
-  request:
-    task: understanding
-    params:
+    generation_cfg:
       num_inference_steps: 50
       seed: 42
-      max_new_tokens: 20
+
+    understanding_cfg:
+      max_new_tokens: 2048
 
 mmbench:
   datasets: [mmbench_dev_20230712]

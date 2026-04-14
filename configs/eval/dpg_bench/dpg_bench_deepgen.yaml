@@ -5,9 +5,8 @@ inference:
     device: "cuda:0"
     torch_dtype: bfloat16
     seed: 42
-  request:
-    task: generation
-    params:
+
+    generation_cfg:
       num_inference_steps: 50
       guidance_scale: 7.5
       height: 512

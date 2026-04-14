@@ -2,17 +2,16 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
 from pathlib import Path
 from typing import Any
 
-from datasets import load_dataset
-from PIL import Image
+from tqdm import tqdm
 
 from umm.core.config import load_config
-from umm.inference import InferencePipeline
 
 
 DS_COLLECTIONS = {
@@ -38,6 +37,140 @@ COT_INSTRUCTION = (
     "\n\n"
     "{question}"
 )
+
+
+# Load few-shot demo prompt from the canonical source
+from umm.eval.internvl_chat.eval.mathvista.prompts.ext_ans import demo_prompt as _EXTRACT_DEMO_PROMPT
+
+
+def _quick_extract(response: str, problem: dict) -> str | None:
+    """Try rule-based extraction before falling back to LLM."""
+    if not response:
+        return ""
+    question_type = problem.get("question_type", "")
+    answer_type = problem.get("answer_type", "")
+    choices = problem.get("choices") or []
+
+    if question_type == "multi_choice" and response in choices:
+        return response
+    if answer_type == "integer":
+        try:
+            return str(int(response))
+        except (ValueError, TypeError):
+            pass
+    if answer_type == "float":
+        try:
+            return str(float(response))
+        except (ValueError, TypeError):
+            pass
+
+    # Try regex for "Final answer: ..." or "Answer: ..."
+    match = re.search(r"(?:Final answer:|Answer:)\s*(.*)", response, re.IGNORECASE)
+    if match:
+        ans = match.group(1).strip()
+        if ans:
+            return ans
+
+    return None  # need LLM extraction
+
+
+def _build_extract_prompt(query: str, response: str) -> str:
+    """Build the full prompt for LLM-based answer extraction."""
+    test_prompt = f"{query}\n\n{response}"
+    return f"{_EXTRACT_DEMO_PROMPT.strip()}\n\n{test_prompt}\n\nExtracted answer: "
+
+
+def _run_llm_extraction(
+    results: dict[str, Any],
+    model_path: str,
+    max_new_tokens: int = 256,
+    use_quick_extract: bool = True,
+) -> dict[str, Any]:
+    """Extract answers from model responses using a local LLM (e.g. Qwen3-32B)."""
+    # First pass: check which items already have extraction or can be rule-extracted
+    already_done = 0
+    need_llm = []
+    for pid, problem in results.items():
+        if "choices" not in problem:
+            continue
+        # Skip if extraction was already done in a previous run
+        if "extraction" in problem and problem["extraction"]:
+            already_done += 1
+            continue
+        response = problem.get("response", "")
+        if use_quick_extract:
+            quick = _quick_extract(response, problem)
+            if quick is not None:
+                problem["extraction"] = quick
+                continue
+        need_llm.append(pid)
+
+    if already_done > 0:
+        print(
+            f"[mathvista] {already_done} already extracted from previous run",
+            flush=True,
+        )
+
+    print(
+        f"[mathvista] {len(results) - len(need_llm) - already_done} extracted by rules, "
+        f"{len(need_llm)} need LLM",
+        flush=True,
+    )
+
+    # Only load the heavy LLM if there are items that actually need it
+    if not need_llm:
+        print("[mathvista] all items already extracted, skipping LLM load", flush=True)
+        return results
+
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    print(f"[mathvista] loading extraction LLM: {model_path} ...", flush=True)
+    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_path,
+        torch_dtype="auto",
+        device_map="auto",
+        trust_remote_code=True,
+    )
+    model.eval()
+
+    for pid in tqdm(need_llm, desc="mathvista/extract", file=sys.stdout):
+        problem = results[pid]
+        query = problem.get("query", "")
+        response = problem.get("response", "")
+        prompt = _build_extract_prompt(query, response)
+
+        messages = [{"role": "user", "content": prompt}]
+        text = tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True,
+            enable_thinking=False,
+        )
+        inputs = tokenizer(text, return_tensors="pt").to(model.device)
+
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+            )
+        generated = outputs[0][inputs["input_ids"].shape[1]:]
+        extraction = tokenizer.decode(generated, skip_special_tokens=True).strip()
+        # Handle Qwen3 thinking format: strip <think>...</think> block
+        think_match = re.search(r"</think>\s*(.*)", extraction, re.DOTALL)
+        if think_match:
+            extraction = think_match.group(1).strip()
+        # Take only the first line as the extracted answer
+        extraction = extraction.split("\n")[0].strip()
+        problem["extraction"] = extraction
+
+    del model
+    del tokenizer
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    print(f"[mathvista] extraction done for {len(results)} items", flush=True)
+    return results
 
 
 def _resolve_path(path_str: str, repo_root: Path) -> Path:
@@ -76,6 +209,14 @@ def _extract_text(output: Any) -> str:
                 text = _extract_text(item)
                 if text:
                     return text
+        # Handle adapters that return {"understandings": [{"response": "..."}]}
+        for list_key in ("understandings",):
+            container = output.get(list_key)
+            if isinstance(container, list):
+                for item in container:
+                    text = _extract_text(item)
+                    if text:
+                        return text
     if isinstance(output, list):
         for item in output:
             text = _extract_text(item)
@@ -92,6 +233,15 @@ def _load_eval_cfg(config_path: str) -> tuple[dict[str, Any], dict[str, Any], di
     if not eval_cfg and "benchmark" in raw_cfg:
         eval_cfg = {"benchmark": raw_cfg.get("benchmark")}
     return eval_cfg, mathvista_cfg, inference_cfg
+
+
+def _find_latest_results(out_dir: Path, ds_name: str) -> Path | None:
+    """Find the most recent results JSON for a dataset in out_dir."""
+    candidates = sorted(out_dir.glob(f"{ds_name}_*.json"))
+    candidates = [c for c in candidates if "_checkpoint" not in c.name and "_score" not in c.name]
+    if candidates:
+        return max(candidates, key=lambda p: p.stat().st_mtime)
+    return None
 
 
 def run_mathvista_eval_command(args: Any) -> int:
@@ -135,14 +285,31 @@ def run_mathvista_eval_command(args: Any) -> int:
     cache_dir = mathvista_cfg.get("cache_dir")
     max_samples = int(mathvista_cfg.get("max_samples", 0) or 0)
     use_cot = bool(mathvista_cfg.get("cot", False))
-    run_calculation = bool(mathvista_cfg.get("run_calculation", True))
-    run_extract = bool(mathvista_cfg.get("run_extract", True))
-    openai_api_key = mathvista_cfg.get("openai_api_key")
     gt_file = mathvista_cfg.get("gt_file")
     resume = bool(mathvista_cfg.get("resume", False))
 
+    # Mode support (like wise): generate / score / full
+    mode = str(mathvista_cfg.get("mode", "full")).strip().lower()
+    if mode not in ("full", "generate", "score"):
+        print(f"[mathvista] unknown mode '{mode}', defaulting to 'full'", flush=True)
+        mode = "full"
+
+    run_gen = mode in ("full", "generate")
+    run_score = mode in ("full", "score")
+
+    # LLM extraction config (replaces OpenAI)
+    llm_extract_cfg = mathvista_cfg.get("llm_extract", {})
+    if not isinstance(llm_extract_cfg, dict):
+        llm_extract_cfg = {}
+    llm_model_path = str(llm_extract_cfg.get("model_path", "")).strip()
+    llm_max_new_tokens = int(llm_extract_cfg.get("max_new_tokens", 2048))
+
+    # Legacy OpenAI config (fallback when llm_extract is not configured)
+    run_extract_legacy = bool(mathvista_cfg.get("run_extract", False))
+    run_calculation_legacy = bool(mathvista_cfg.get("run_calculation", False))
+    openai_api_key = mathvista_cfg.get("openai_api_key")
+
     out_dir.mkdir(parents=True, exist_ok=True)
-    pipeline = InferencePipeline(backbone_name=backbone, backbone_cfg=backbone_cfg)
 
     summary: dict[str, Any] = {
         "benchmark": "mathvista",
@@ -150,100 +317,171 @@ def run_mathvista_eval_command(args: Any) -> int:
         "out_dir": str(out_dir),
         "datasets": datasets,
         "cot": use_cot,
+        "mode": mode,
     }
 
-    for ds_name in datasets:
-        entry = DS_COLLECTIONS.get(ds_name)
-        if not entry:
-            raise ValueError(f"Unknown MathVista dataset: {ds_name}")
+    # ── Phase 1: Generation ──
+    if run_gen:
+        from datasets import load_dataset
+        from PIL import Image
 
-        dataset_root = str(mathvista_cfg.get("root", entry["root"]))
-        split = str(mathvista_cfg.get("split", entry["split"]))
-        dataset = load_dataset(
-            dataset_root,
-            cache_dir=str(_resolve_path(cache_dir, repo_root)) if cache_dir else None,
-        )
-        data = dataset[split]
+        from umm.inference import InferencePipeline
 
-        results_file: Path | None = None
-        if resume:
-            candidates = sorted(out_dir.glob(f"{ds_name}_*.json"))
-            if candidates:
-                results_file = max(candidates, key=lambda p: p.stat().st_mtime)
-                print(f"[umm eval] resume enabled: using {results_file}")
+        pipeline = InferencePipeline(backbone_name=backbone, backbone_cfg=backbone_cfg)
 
-        if results_file is None:
+        for ds_name in datasets:
+            entry = DS_COLLECTIONS.get(ds_name)
+            if not entry:
+                raise ValueError(f"Unknown MathVista dataset: {ds_name}")
+
+            dataset_root = str(mathvista_cfg.get("root", entry["root"]))
+            split = str(mathvista_cfg.get("split", entry["split"]))
+            dataset = load_dataset(
+                dataset_root,
+                cache_dir=str(_resolve_path(cache_dir, repo_root)) if cache_dir else None,
+            )
+            data = dataset[split]
+
+            checkpoint_json = out_dir / f"{ds_name}_checkpoint.json"
             results: dict[str, Any] = {}
-            for idx, data_item in enumerate(data, start=1):
-                image = data_item.get("decoded_image")
-                if image is None:
-                    raise ValueError("MathVista sample missing `decoded_image`.")
-                if not isinstance(image, Image.Image):
-                    raise ValueError("Expected `decoded_image` to be a PIL image.")
+            results_file: Path | None = None
 
-                pid = data_item.get("pid")
-                if pid is None:
-                    raise ValueError("MathVista sample missing `pid`.")
-                image_dir.mkdir(parents=True, exist_ok=True)
-                image_path = image_dir / f"{pid}.png"
-                image.save(image_path, format="PNG")
-
-                question = data_item.get("query")
-                if question is None:
-                    raise ValueError("MathVista sample missing `query`.")
-                if use_cot:
-                    prompt = COT_INSTRUCTION.format(question=question)
+            if resume:
+                if checkpoint_json.exists():
+                    results = json.loads(checkpoint_json.read_text("utf-8"))
+                    print(f"[mathvista] resume from checkpoint: {len(results)} done", flush=True)
                 else:
-                    prompt = question
+                    results_file = _find_latest_results(out_dir, ds_name)
+                    if results_file:
+                        print(f"[mathvista] resume: using completed file {results_file}", flush=True)
 
-                payload = {
-                    "backbone": backbone,
-                    "task": "understanding",
-                    "prompt": prompt,
-                    "images": [str(image_path)],
-                    "params": request_params,
-                    "metadata": {"pid": pid, "dataset": ds_name},
-                }
-                response = _extract_text(pipeline.run(payload))
+            if results_file is None:
+                print(
+                    f"[mathvista] {ds_name}: {len(data)} total, {len(results)} done, "
+                    f"{len(data) - len(results)} remaining",
+                    flush=True,
+                )
+                for idx, data_item in enumerate(tqdm(data, desc=f"mathvista/{ds_name}", file=sys.stdout), start=1):
+                    pid = data_item.get("pid")
+                    if pid is None:
+                        raise ValueError("MathVista sample missing `pid`.")
+                    if str(pid) in results:
+                        continue
 
-                item = dict(data_item)
-                item.pop("decoded_image", None)
-                item["response"] = response
-                results[str(pid)] = item
+                    image = data_item.get("decoded_image")
+                    if image is None:
+                        raise ValueError("MathVista sample missing `decoded_image`.")
+                    if not isinstance(image, Image.Image):
+                        raise ValueError("Expected `decoded_image` to be a PIL image.")
 
-                if max_samples > 0 and idx >= max_samples:
-                    break
+                    image_dir.mkdir(parents=True, exist_ok=True)
+                    image_path = image_dir / f"{pid}.png"
+                    image.save(image_path, format="PNG")
 
-            time_prefix = time.strftime("%y%m%d%H%M%S", time.localtime())
-            results_file = out_dir / f"{ds_name}_{time_prefix}.json"
-            results_file.write_text(json.dumps(results, indent=2), encoding="utf-8")
+                    question = data_item.get("query")
+                    if question is None:
+                        raise ValueError("MathVista sample missing `query`.")
+                    if use_cot:
+                        prompt = COT_INSTRUCTION.format(question=question)
+                    else:
+                        prompt = question
 
-        summary[f"{ds_name}_output_path"] = str(results_file)
+                    payload = {
+                        "backbone": backbone,
+                        "task": "understanding",
+                        "prompt": prompt,
+                        "images": [str(image_path)],
+                        "params": request_params,
+                        "metadata": {"pid": pid, "dataset": ds_name},
+                    }
+                    response = _extract_text(pipeline.run(payload))
 
-        if run_extract:
-            cmd = [
-                sys.executable,
-                "src/umm/eval/internvl_chat/eval/mathvista/extract_answer.py",
-                "--output_file",
-                results_file.name,
-                "--output_dir",
-                str(out_dir),
-            ]
-            if use_cot:
-                cmd.append("--quick_extract")
-            env = None
-            if isinstance(openai_api_key, str) and openai_api_key.strip():
-                env = dict(os.environ)
-                env["OPENAI_API_KEY"] = openai_api_key.strip()
-            proc = subprocess.run(cmd, cwd=str(repo_root), capture_output=True, text=True, env=env)
-            print(proc.stdout)
-            if proc.returncode != 0:
-                if proc.stderr:
-                    print(proc.stderr, file=sys.stderr)
-                raise RuntimeError(f"MathVista extract_answer failed with return code {proc.returncode}")
-            summary[f"{ds_name}_extract_stdout"] = proc.stdout
+                    item = dict(data_item)
+                    item.pop("decoded_image", None)
+                    item["response"] = response
+                    results[str(pid)] = item
 
-        if run_calculation:
+                    checkpoint_json.write_text(json.dumps(results, indent=2), encoding="utf-8")
+
+                    if max_samples > 0 and len(results) >= max_samples:
+                        break
+
+                time_prefix = time.strftime("%y%m%d%H%M%S", time.localtime())
+                results_file = out_dir / f"{ds_name}_{time_prefix}.json"
+                results_file.write_text(json.dumps(results, indent=2), encoding="utf-8")
+
+                if checkpoint_json.exists():
+                    checkpoint_json.unlink()
+
+            summary[f"{ds_name}_output_path"] = str(results_file)
+
+        if mode == "generate":
+            print(f"[mathvista] generation phase done, outputs={out_dir}", flush=True)
+
+        # Free GPU memory from generation pipeline before scoring
+        del pipeline
+        import gc
+        gc.collect()
+        import torch as _torch
+        if _torch.cuda.is_available():
+            _torch.cuda.empty_cache()
+        print("[mathvista] released generation pipeline GPU memory", flush=True)
+
+    # ── Phase 2: Scoring (extract + calculate) ──
+    if run_score:
+        for ds_name in datasets:
+            # Find results file from generation phase (or previous run)
+            results_file = None
+            if f"{ds_name}_output_path" in summary:
+                results_file = Path(summary[f"{ds_name}_output_path"])
+            else:
+                results_file = _find_latest_results(out_dir, ds_name)
+            if results_file is None or not results_file.exists():
+                raise FileNotFoundError(
+                    f"No results file found for {ds_name} in {out_dir}. "
+                    f"Run generation phase first (mode: generate)."
+                )
+
+            print(f"[mathvista] scoring {ds_name} from {results_file}", flush=True)
+            results = json.loads(results_file.read_text("utf-8"))
+
+            # ── Extract answers ──
+            if llm_model_path:
+                # Use local Qwen model for extraction
+                results = _run_llm_extraction(
+                    results,
+                    model_path=llm_model_path,
+                    max_new_tokens=llm_max_new_tokens,
+                    use_quick_extract=use_cot,
+                )
+                # Save results with extraction field
+                results_file.write_text(json.dumps(results, indent=2), encoding="utf-8")
+                print(f"[mathvista] saved extractions to {results_file}", flush=True)
+            elif run_extract_legacy:
+                # Fallback: use legacy OpenAI-based extract_answer.py
+                cmd = [
+                    sys.executable,
+                    "src/umm/eval/internvl_chat/eval/mathvista/extract_answer.py",
+                    "--output_file",
+                    results_file.name,
+                    "--output_dir",
+                    str(out_dir),
+                ]
+                if use_cot:
+                    cmd.append("--quick_extract")
+                env = None
+                if isinstance(openai_api_key, str) and openai_api_key.strip():
+                    env = dict(os.environ)
+                    env["OPENAI_API_KEY"] = openai_api_key.strip()
+                proc = subprocess.run(cmd, cwd=str(repo_root), capture_output=True, text=True, env=env)
+                print(proc.stdout)
+                if proc.returncode != 0:
+                    if proc.stderr:
+                        print(proc.stderr, file=sys.stderr)
+                    raise RuntimeError(f"MathVista extract_answer failed with return code {proc.returncode}")
+                summary[f"{ds_name}_extract_stdout"] = proc.stdout
+
+            # ── Calculate scores ──
             score_file = results_file.with_name(f"{results_file.stem}_score.json")
             cmd = [
                 sys.executable,
@@ -257,11 +495,7 @@ def run_mathvista_eval_command(args: Any) -> int:
             ]
             if isinstance(gt_file, str) and gt_file.strip():
                 cmd.extend(["--gt_file", gt_file.strip()])
-            env = None
-            if isinstance(openai_api_key, str) and openai_api_key.strip():
-                env = dict(os.environ)
-                env["OPENAI_API_KEY"] = openai_api_key.strip()
-            proc = subprocess.run(cmd, cwd=str(repo_root), capture_output=True, text=True, env=env)
+            proc = subprocess.run(cmd, cwd=str(repo_root), capture_output=True, text=True)
             print(proc.stdout)
             if proc.returncode != 0:
                 if proc.stderr:
@@ -276,5 +510,5 @@ def run_mathvista_eval_command(args: Any) -> int:
         score_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
         print(f"[umm eval] wrote MathVista summary to {score_path}")
 
-    print(f"[umm eval] completed MathVista for backbone={backbone}, outputs={out_dir}")
+    print(f"[umm eval] completed MathVista (mode={mode}) for backbone={backbone}, outputs={out_dir}")
     return 0

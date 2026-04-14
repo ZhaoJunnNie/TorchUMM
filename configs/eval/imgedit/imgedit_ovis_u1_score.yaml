@@ -13,9 +13,6 @@ imgedit:
   vlm_eval:
     backbone: qwen25vl
     model_path: ${UMM_MODEL_CACHE}/evaluator/Qwen2.5-VL-72B-Instruct
-
 inference:
   backbone: ovis_u1
   backbone_cfg: {}
-  request:
-    params: {}

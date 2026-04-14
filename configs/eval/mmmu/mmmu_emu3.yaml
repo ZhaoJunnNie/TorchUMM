@@ -11,9 +11,8 @@ inference:
     device: cuda:0
     torch_dtype: bfloat16
     attn_implementation: flash_attention_2
-  request:
-    task: understanding
-    params:
+
+    generation_cfg:
       max_new_tokens: 1024
 
 mmmu:

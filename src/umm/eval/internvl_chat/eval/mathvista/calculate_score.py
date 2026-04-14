@@ -1,9 +1,12 @@
 import argparse
+import json
+import os
+import re
 
 import pandas as pd
 # !pip install python-Levenshtein
 from Levenshtein import distance
-from utilities import *
+from utilities import read_json, save_json
 
 
 def get_most_similar(prediction, choices):
@@ -114,9 +117,13 @@ if __name__ == '__main__':
     print(f'Reading {output_file}...')
     results = read_json(output_file)
 
-    # read ground truth
-    print(f'Reading {args.gt_file}...')
-    gts = read_json(args.gt_file)
+    # read ground truth (optional — results already contain answers from load_dataset)
+    gts = {}
+    if args.gt_file and os.path.isfile(args.gt_file):
+        print(f'Reading {args.gt_file}...')
+        gts = read_json(args.gt_file)
+    else:
+        print(f'Ground truth file not found or not specified, using answers from results.')
 
     # full pids
     full_pids = list(results.keys())

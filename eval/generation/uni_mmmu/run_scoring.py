@@ -16,26 +16,12 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict
-
-
-def _load_config_minimal(path: str) -> Dict[str, Any]:
-    """Load YAML/JSON config without requiring the full umm package."""
-    import json
-    p = Path(path)
-    text = p.read_text(encoding="utf-8")
-    if p.suffix in (".yaml", ".yml"):
-        try:
-            import yaml
-            return yaml.safe_load(text) or {}
-        except ImportError:
-            # Fallback: try umm loader
-            from umm.core.config import load_config
-            return load_config(path)
-    return json.loads(text)
+from umm.core.config import load_config
 
 
 def _resolve_path(path_str: str, repo_root: Path) -> Path:
+    # Expand environment variables (e.g. ${UMM_MODEL_CACHE}) before resolving
+    path_str = os.path.expandvars(path_str)
     path = Path(path_str).expanduser()
     if not path.is_absolute():
         path = repo_root / path
@@ -68,7 +54,7 @@ def main() -> int:
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parents[3]
-    raw_cfg = _load_config_minimal(args.config)
+    raw_cfg = load_config(args.config)
 
     inference_cfg = raw_cfg.get("inference", {})
     if not isinstance(inference_cfg, dict):
@@ -124,11 +110,11 @@ def main() -> int:
 
     qwen3 = scoring_cfg.get("text_lm_model") or scoring_cfg.get("qwen3_model")
     if qwen3:
-        cmd.extend(["--qwen3_model", str(qwen3)])
+        cmd.extend(["--qwen3_model", os.path.expandvars(str(qwen3))])
 
     qwen_vl = scoring_cfg.get("vl_model") or scoring_cfg.get("qwen2_5_vl_model")
     if qwen_vl:
-        cmd.extend(["--qwen2_5_vl_model", str(qwen_vl)])
+        cmd.extend(["--qwen2_5_vl_model", os.path.expandvars(str(qwen_vl))])
 
     vl_attn = scoring_cfg.get("vl_attn_impl")
     if vl_attn:
@@ -136,7 +122,7 @@ def main() -> int:
 
     dreamsim_cache = scoring_cfg.get("dreamsim_cache")
     if dreamsim_cache:
-        cmd.extend(["--dreamsim_cache", str(dreamsim_cache)])
+        cmd.extend(["--dreamsim_cache", os.path.expandvars(str(dreamsim_cache))])
 
     if raw_cfg.get("uni_mmmu", {}).get("resume"):
         cmd.append("--resume")

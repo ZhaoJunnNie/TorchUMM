@@ -11,14 +11,9 @@ inference:
     seed: 42
     torch_dtype: bfloat16
     understanding_cfg:
-      max_new_tokens: 100
-      top_k: 1
-      temperature: 0.8
+      max_new_tokens: 2048
+      do_sample: false
       use_clip_vit: true
-  request:
-    task: understanding
-    params:
-      max_new_tokens: 1000
 
 mmvet:
   datasets: [mmvet]

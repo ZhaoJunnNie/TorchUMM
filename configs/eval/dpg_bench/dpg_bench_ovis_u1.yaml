@@ -7,9 +7,6 @@ inference:
       width: 1024
       num_steps: 50
       txt_cfg: 5.0
-  request:
-    task: generation
-    params: {}
 
 dpg_bench:
   prompts_dir: eval/generation/dpg_bench/prompts

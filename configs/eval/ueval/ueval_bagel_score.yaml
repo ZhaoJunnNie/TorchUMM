@@ -4,12 +4,9 @@ eval:
 inference:
   backbone: bagel
   backbone_cfg: {}
-  request:
-    params: {}
-
 ueval:
   mode: score
-  hf_dataset: primerL/UEval-all
+  hf_dataset: zlab-princeton/UEval
   domains: all
   out_dir: output/ueval/bagel
   max_samples: 0

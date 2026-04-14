@@ -8,15 +8,17 @@ inference:
     omnigen2_root: ${UMM_CODEBASE}/model/OmniGen2
     device: "cuda:0"
     torch_dtype: bfloat16
-  request:
-    params:
-      max_new_tokens: 512
+    generation_cfg:
       num_inference_steps: 50
       text_guidance_scale: 4.0
+      seed: 0
+    understanding_cfg:
+      max_new_tokens: 5120
+      do_sample: false
 
 ueval:
   mode: full
-  hf_dataset: primerL/UEval-all
+  hf_dataset: zlab-princeton/UEval
   domains: all
   out_dir: output/ueval/omnigen2
   max_samples: 0

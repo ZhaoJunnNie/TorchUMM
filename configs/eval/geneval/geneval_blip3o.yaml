@@ -30,5 +30,3 @@ inference:
     seq_len: 729
     top_p: 0.95
     top_k: 1200
-  request:
-    params: {}

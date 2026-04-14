@@ -19,20 +19,11 @@ inference:
     understanding_cfg:
       max_think_token_n: 1000
       do_sample: false
-  request:
-    params: {}
-
 ueval:
   mode: generate
-  hf_dataset: primerL/UEval-all
+  hf_dataset: zlab-princeton/UEval
   local_cache: ${UMM_DATASETS}/ueval/UEval
   domains: all
   out_dir: output/ueval/bagel_think
   max_samples: 0
   resume: true
-  score_output_path: output/ueval/bagel_think/eval_results.json
-  scoring:
-    text_model: Qwen/Qwen3-32B
-    vl_model: Qwen/Qwen2.5-VL-72B-Instruct
-    text_field: text_answer
-    image_field: image_answer

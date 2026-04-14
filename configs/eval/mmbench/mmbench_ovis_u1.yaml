@@ -5,10 +5,9 @@ inference:
   backbone: ovis_u1
   backbone_cfg:
     model_path: ${UMM_MODEL_CACHE}/ovis_u1/Ovis-U1-3B
-  request:
-    task: understanding
-    params:
-      max_new_tokens: 4096
+
+    understanding_cfg:
+      max_new_tokens: 2048
       do_sample: false
 
 mmbench:

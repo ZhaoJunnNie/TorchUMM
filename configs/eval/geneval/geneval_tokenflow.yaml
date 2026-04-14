@@ -29,5 +29,3 @@ inference:
     loop: 1
     mixed_precision: bf16
     batch_size: 1
-  request:
-    params: {}

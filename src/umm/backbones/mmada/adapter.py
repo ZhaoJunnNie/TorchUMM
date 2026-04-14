@@ -70,20 +70,22 @@ class MMaDABackbone:
         self.resolution = 512
 
         self.default_generation_cfg: dict[str, Any] = {
-            "guidance_scale": 1.5,
+            "guidance_scale": 3.5,
             "temperature": 1.0,
-            "timesteps": 12,
+            "timesteps": 15,
             "num_vq_tokens": 1024,
             "codebook_size": 8192,
             "resolution": 512,
             "mask_schedule": "cosine",
+            "do_sample": True,
         }
         self.default_understanding_cfg: dict[str, Any] = {
-            "max_new_tokens": 512,
+            "max_new_tokens": 5120,
             "steps": 256,
             "block_length": 128,
             "temperature": 0.0,
             "remasking": "low_confidence",
+            "do_sample": False,
         }
 
         # Populated by load()
@@ -199,7 +201,10 @@ class MMaDABackbone:
             config.update(generation_cfg)
 
         guidance_scale = float(config.get("guidance_scale", 1.5))
+        do_sample = bool(config.get("do_sample", True))
         temperature = float(config.get("temperature", 1.0))
+        if not do_sample:
+            temperature = 0.0
         timesteps = int(config.get("timesteps", 12))
         num_vq_tokens = int(config.get("num_vq_tokens", 1024))
         codebook_size = int(config.get("codebook_size", 8192))
@@ -289,9 +294,19 @@ class MMaDABackbone:
             config.update(understanding_cfg)
 
         max_new_tokens = int(config.get("max_new_tokens", 512))
-        steps = int(config.get("steps", max(1, max_new_tokens // 2)))
         block_length = int(config.get("block_length", max(1, max_new_tokens // 4)))
+        # Ensure max_new_tokens is divisible by block_length (model requirement)
+        if max_new_tokens % block_length != 0:
+            max_new_tokens = ((max_new_tokens + block_length - 1) // block_length) * block_length
+        num_blocks = max(1, max_new_tokens // block_length)
+        steps = int(config.get("steps", max(1, max_new_tokens // 2)))
+        # Ensure steps is divisible by num_blocks (model requirement)
+        if steps % num_blocks != 0:
+            steps = max(num_blocks, ((steps + num_blocks - 1) // num_blocks) * num_blocks)
+        do_sample = bool(config.get("do_sample", False))
         temperature = float(config.get("temperature", 0.0))
+        if not do_sample:
+            temperature = 0.0
         remasking = str(config.get("remasking", "low_confidence"))
 
         # Build chat messages

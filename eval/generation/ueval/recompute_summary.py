@@ -6,7 +6,7 @@ by matching item IDs against the dataset to get task labels.
 Usage:
     python eval/generation/ueval/recompute_summary.py \
         --eval_results /path/to/eval_results.json \
-        --dataset_cache /path/to/UEval   # or --hf_dataset primerL/UEval-all
+        --dataset_cache /path/to/UEval   # or --hf_dataset zlab-princeton/UEval
 """
 import argparse
 import json
@@ -17,7 +17,7 @@ from typing import Any, Dict, List
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--eval_results", required=True)
-    parser.add_argument("--hf_dataset", default="primerL/UEval-all")
+    parser.add_argument("--hf_dataset", default="zlab-princeton/UEval")
     parser.add_argument("--dataset_cache", default=None)
     args = parser.parse_args()
 

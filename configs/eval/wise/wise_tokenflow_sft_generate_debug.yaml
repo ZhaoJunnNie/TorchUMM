@@ -1,0 +1,26 @@
+eval:
+  benchmark: wise
+
+wise:
+  data_root: eval/generation/wise/data
+  out_dir: output/wise/tokenflow_sft_debug
+  max_samples: 3
+  resume: false
+  score_output_path: output/wise/tokenflow_sft_debug/summary.json
+  mode: generate
+  vlm_eval:
+    enabled: false
+  run_calculate: false
+
+inference:
+  backbone: tokenflow
+  backbone_cfg:
+    model_path: ${UMM_POST_TRAIN_MODEL_CACHE}/post_train/tokenflow
+    tokenizer_path: ${UMM_MODEL_CACHE}/tokenflow/TokenFlow/tokenflow_clipb_32k_enhanced.pt
+    tokenflow_root: ${UMM_CODEBASE}/model/TokenFlow
+    cfg: 7.5
+    loop: 1
+    mixed_precision: bf16
+    batch_size: 1
+  request:
+    params: {}

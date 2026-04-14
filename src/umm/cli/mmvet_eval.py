@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import sys
 import time
 from pathlib import Path
 from typing import Any
 
 from PIL import Image
+from tqdm import tqdm
 
 from umm.core.config import load_config
 from umm.inference import InferencePipeline
@@ -54,6 +56,14 @@ def _extract_text(output: Any) -> str:
                 text = _extract_text(item)
                 if text:
                     return text
+        # Handle adapters that return {"understandings": [{"response": "..."}]}
+        for list_key in ("understandings",):
+            container = output.get(list_key)
+            if isinstance(container, list):
+                for item in container:
+                    text = _extract_text(item)
+                    if text:
+                        return text
     if isinstance(output, list):
         for item in output:
             text = _extract_text(item)
@@ -143,45 +153,62 @@ def run_mmvet_eval_command(args: Any) -> int:
         if not question_path.exists():
             raise FileNotFoundError(f"MM-Vet question file not found: {question_path}")
 
-        outputs = {}
-        with question_path.open("r", encoding="utf-8") as reader:
-            for idx, line in enumerate(reader, start=1):
-                line = line.strip()
-                if not line:
-                    continue
-                row = json.loads(line)
-                image_name = row["image"]
-                question = row["text"]
-                question_id = row["question_id"]
+        # Resume: load checkpoint if exists
+        checkpoint_json = out_dir / f"{ds_name}_checkpoint.json"
+        outputs: dict[str, str] = {}
+        if checkpoint_json.exists():
+            outputs = json.loads(checkpoint_json.read_text("utf-8"))
+            print(f"[mmvet] resume: {len(outputs)} done, skipping completed items", flush=True)
 
-                image_path = image_root / image_name
-                if not image_path.exists():
-                    raise FileNotFoundError(f"MM-Vet image not found: {image_path}")
+        lines = [l.strip() for l in question_path.read_text("utf-8").splitlines() if l.strip()]
+        print(f"[mmvet] {ds_name}: {len(lines)} total, {len(outputs)} done", flush=True)
 
-                # Ensure image is readable early (helps catch corrupt files)
-                try:
-                    with Image.open(image_path) as img:
-                        img.verify()
-                except Exception as exc:
-                    raise RuntimeError(f"Failed to open image {image_path}: {exc}") from exc
+        for idx, line in enumerate(tqdm(lines, desc=f"mmvet/{ds_name}", file=sys.stdout), start=1):
+            row = json.loads(line)
+            image_name = row["image"]
+            question = row["text"]
+            question_id = row["question_id"]
+            # question_id already has "v1_" prefix in the dataset
+            output_key = str(question_id) if str(question_id).startswith("v1_") else f"v1_{question_id}"
 
-                payload = {
-                    "backbone": backbone,
-                    "task": "understanding",
-                    "prompt": question,
-                    "images": [str(image_path)],
-                    "params": request_params,
-                    "metadata": {"question_id": question_id, "dataset": ds_name},
-                }
-                response = _extract_text(pipeline.run(payload))
-                outputs[f"v1_{question_id}"] = response
+            if output_key in outputs:
+                continue
 
-                if max_samples > 0 and idx >= max_samples:
-                    break
+            image_path = image_root / image_name
+            if not image_path.exists():
+                raise FileNotFoundError(f"MM-Vet image not found: {image_path}")
+
+            try:
+                with Image.open(image_path) as img:
+                    img.verify()
+            except Exception as exc:
+                raise RuntimeError(f"Failed to open image {image_path}: {exc}") from exc
+
+            payload = {
+                "backbone": backbone,
+                "task": "understanding",
+                "prompt": question,
+                "images": [str(image_path)],
+                "params": request_params,
+                "metadata": {"question_id": question_id, "dataset": ds_name},
+            }
+            response = _extract_text(pipeline.run(payload))
+            outputs[output_key] = response
+
+            # Write checkpoint after each item
+            checkpoint_json.write_text(json.dumps(outputs, indent=2), encoding="utf-8")
+
+            if max_samples > 0 and idx >= max_samples:
+                break
 
         time_prefix = time.strftime("%y%m%d%H%M%S", time.localtime())
         results_file = out_dir / f"{ds_name}_{time_prefix}.json"
         results_file.write_text(json.dumps(outputs, indent=2), encoding="utf-8")
+
+        # Clean up checkpoint after successful completion
+        if checkpoint_json.exists():
+            checkpoint_json.unlink()
+
         summary[f"{ds_name}_output_path"] = str(results_file)
 
     if isinstance(score_output_path, str) and score_output_path:

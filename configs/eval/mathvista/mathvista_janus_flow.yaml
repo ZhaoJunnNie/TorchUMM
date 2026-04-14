@@ -10,14 +10,9 @@ inference:
     seed: 42
     torch_dtype: bfloat16
     understanding_cfg:
-      max_new_tokens: 512
+      max_new_tokens: 2048
       do_sample: false
       use_cache: true
-  request:
-    task: understanding
-    params:
-      max_new_tokens: 20
-      do_sample: false
 
 mathvista:
   mode: generate
@@ -29,5 +24,5 @@ mathvista:
   out_dir: output/mathvista/janus_flow
   score_output_path: output/mathvista/janus_flow/summary.json
   llm_extract:
-    model_path: ${UMM_MODEL_CACHE}/evaluator/Qwen3-32B
-    max_new_tokens: 256
+    model_path: ${UMM_MODEL_CACHE}/evaluator/Qwen3-32B-AWQ
+    max_new_tokens: 2048

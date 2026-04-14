@@ -17,5 +17,3 @@ gedit:
 inference:
   backbone: emu3_5
   backbone_cfg: {}
-  request:
-    params: {}

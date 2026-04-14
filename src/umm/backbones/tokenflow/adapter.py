@@ -78,6 +78,11 @@ class TokenFlowBackbone:
             return [str(item) for item in prompt_value if isinstance(item, (str, int, float))]
         return [str(prompt_value)]
 
+    def understand(self, batch: dict[str, Any], understanding_cfg: dict[str, Any]) -> dict[str, Any]:
+        # TokenFlow is a T2I-only model; return empty text so the pipeline
+        # falls back to using the raw prompt for image generation.
+        return {"text": ""}
+
     def generate(self, batch: dict[str, Any], gen_cfg: dict[str, Any]) -> dict[str, Any]:
         prompts = self._normalize_prompts(batch, gen_cfg)
         if not prompts:
@@ -126,6 +131,15 @@ class TokenFlowBackbone:
             )
 
             if proc.returncode != 0:
+                # Surface subprocess errors to both stdout and stderr
+                msg = f"[tokenflow] subprocess failed (rc={proc.returncode})"
+                stderr_tail = (proc.stderr or "")[-2000:]
+                print(msg, flush=True)
+                sys.stderr.write(msg + "\n")
+                if stderr_tail:
+                    print(f"[tokenflow] stderr:\n{stderr_tail}", flush=True)
+                    sys.stderr.write(f"[tokenflow] stderr:\n{stderr_tail}\n")
+                sys.stderr.flush()
                 return {
                     "error": f"TokenFlow generation failed with return code {proc.returncode}",
                     "stdout": proc.stdout,
@@ -140,6 +154,14 @@ class TokenFlowBackbone:
                     "stderr": proc.stderr,
                     **payload,
                 }
+            msg = "[tokenflow] subprocess returned 0 but no results file"
+            stderr_tail = (proc.stderr or "")[-2000:]
+            print(msg, flush=True)
+            sys.stderr.write(msg + "\n")
+            if stderr_tail:
+                print(f"[tokenflow] stderr:\n{stderr_tail}", flush=True)
+                sys.stderr.write(f"[tokenflow] stderr:\n{stderr_tail}\n")
+            sys.stderr.flush()
             return {"error": "No results file produced", "stdout": proc.stdout, "stderr": proc.stderr}
 
     @staticmethod

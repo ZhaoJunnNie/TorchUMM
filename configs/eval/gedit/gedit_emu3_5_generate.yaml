@@ -1,6 +1,5 @@
 eval:
   benchmark: gedit
-
 gedit:
   data_root: ${UMM_DATASETS}/gedit/GEdit-Bench
   out_dir: output/gedit/emu3_5
@@ -26,7 +25,6 @@ inference:
     gpu_memory_utilization: 0.7
     classifier_free_guidance: 5.0
     image_area: 1048576
-  request:
-    params:
+    generation_cfg:
       max_new_tokens: 5120
       classifier_free_guidance: 5.0

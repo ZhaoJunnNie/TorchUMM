@@ -155,7 +155,7 @@ def _extract_text(output: Any) -> str:
 
 def _extract_saved_path(result: Any, fallback_dir: Path) -> str:
     if isinstance(result, dict):
-        for key in ("saved_paths", "output_path", "image_path"):
+        for key in ("saved_paths", "output_path", "image_path", "image_paths"):
             val = result.get(key)
             if isinstance(val, list) and val and isinstance(val[0], str) and val[0]:
                 p = Path(val[0])
@@ -173,11 +173,16 @@ def _extract_saved_path(result: Any, fallback_dir: Path) -> str:
             img.save(str(out_path), format="PNG")
             return str(out_path)
         imgs = result.get("images")
-        if isinstance(imgs, list) and imgs and isinstance(imgs[0], Image.Image):
-            out_path = fallback_dir / "generated.png"
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            imgs[0].save(str(out_path), format="PNG")
-            return str(out_path)
+        if isinstance(imgs, list) and imgs:
+            if isinstance(imgs[0], str) and imgs[0]:
+                p = Path(imgs[0])
+                if p.is_file():
+                    return str(p)
+            elif isinstance(imgs[0], Image.Image):
+                out_path = fallback_dir / "generated.png"
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                imgs[0].save(str(out_path), format="PNG")
+                return str(out_path)
     if isinstance(result, Image.Image):
         out_path = fallback_dir / "generated.png"
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -199,7 +204,7 @@ def _extract_saved_path(result: Any, fallback_dir: Path) -> str:
 # Generation
 # ---------------------------------------------------------------------------
 
-_BATCH_CAPABLE_BACKBONES: set[str] = {"show_o2"}
+_BATCH_CAPABLE_BACKBONES: set[str] = {"show_o2", "emu3_5"}
 
 
 def _run_generation(
@@ -283,25 +288,40 @@ def _run_generation_batch(
     # Prefer unified path (single model load) if available
     if hasattr(bb, "run_unified_batch"):
         print(f"[ueval] using unified batch (single model load) for {len(pending)} items ...")
-        try:
-            text_results, gen_results = bb.run_unified_batch(
-                items=pending,
-                images_dir=images_dir,
-                understanding_params=request_params,
-                gen_params=request_params,
-            )
-        except Exception as exc:
-            print(f"[ueval] unified batch error: {exc}")
-            text_results = [{"text": ""}] * len(pending)
-            gen_results = [{"ok": False}] * len(pending)
 
         for i, p in enumerate(pending):
-            text_answer = text_results[i].get("text", "") if i < len(text_results) else ""
-            final_img = images_dir / f"{p['item_id']}.png"
+            print(f"[ueval-unified] [{i + 1}/{len(pending)}] id={p['item_id']}", flush=True)
+
+            try:
+                text_results, gen_results = bb.run_unified_batch(
+                    items=[p],
+                    images_dir=images_dir,
+                    understanding_params=request_params,
+                    gen_params=request_params,
+                )
+                text_answer = text_results[0].get("text", "") if text_results else ""
+                ok = gen_results[0].get("ok", False) if gen_results else False
+            except Exception as exc:
+                print(f"[ueval-unified]   error: {exc}", flush=True)
+                text_answer = ""
+                ok = False
+
             image_paths: List[str] = []
-            ok = i < len(gen_results) and gen_results[i].get("ok", False)
-            if ok and final_img.is_file():
-                image_paths.append(str(final_img))
+            if ok:
+                # Multi-image pattern: {item_id}_0.png, {item_id}_1.png, ...
+                idx = 0
+                while True:
+                    candidate = images_dir / f"{p['item_id']}_{idx}.png"
+                    if candidate.is_file():
+                        image_paths.append(str(candidate))
+                        idx += 1
+                    else:
+                        break
+                # Fallback: single image pattern (e.g. show_o2)
+                if not image_paths:
+                    single = images_dir / f"{p['item_id']}.png"
+                    if single.is_file():
+                        image_paths.append(str(single))
 
             if text_answer or image_paths:
                 n_ok += 1
@@ -317,9 +337,11 @@ def _run_generation_batch(
                 "image_answer": image_paths,
             })
 
-        results_path.write_text(
-            json.dumps(model_outputs, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+            # Checkpoint after every item
+            results_path.write_text(
+                json.dumps(model_outputs, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+
         summary = {"total": len(prompts), "ok": n_ok, "skipped": n_skip, "error": n_err}
         return model_outputs, summary
 

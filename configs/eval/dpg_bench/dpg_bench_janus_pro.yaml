@@ -12,10 +12,6 @@ inference:
       image_token_num_per_image: 576
       img_size: 384
       patch_size: 16
-  request:
-    task: generation
-    params:
-      parallel_size: 4
 
 dpg_bench:
   prompts_dir: eval/generation/dpg_bench/prompts

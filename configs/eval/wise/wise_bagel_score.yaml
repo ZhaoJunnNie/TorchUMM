@@ -18,5 +18,3 @@ wise:
 inference:
   backbone: bagel
   backbone_cfg: {}
-  request:
-    params: {}

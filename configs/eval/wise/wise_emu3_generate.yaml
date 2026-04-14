@@ -1,6 +1,5 @@
 eval:
   benchmark: wise
-
 wise:
   data_root: eval/generation/wise/data
   out_dir: output/wise/emu3
@@ -25,7 +24,6 @@ inference:
     device_map: "cuda:0"
     torch_dtype: bfloat16
     attn_implementation: flash_attention_2
-  request:
-    params:
+    generation_cfg:
       max_new_tokens: 40960
       classifier_free_guidance: 3.0

@@ -1,0 +1,29 @@
+eval:
+  benchmark: gedit
+
+gedit:
+  data_root: ${UMM_DATASETS}/gedit/GEdit-Bench
+  out_dir: output/gedit/omnigen2_sft
+  mode: generate
+  resume: true
+  model_name: omnigen2_sft
+  instruction_language: all
+  task_type: all
+  run_calculate: true
+  score_output_path: output/gedit/omnigen2_sft/summary.json
+  vlm_eval:
+    backbone: qwen25vl
+    model_path: ${UMM_MODEL_CACHE}/evaluator/Qwen2.5-VL-72B-Instruct
+
+inference:
+  backbone: omnigen2
+  backbone_cfg:
+    model_path: ${UMM_POST_TRAIN_MODEL_CACHE}/post_train/omnigen2
+    omnigen2_root: ${UMM_CODEBASE}/model/OmniGen2
+    device: "cuda:0"
+    torch_dtype: bfloat16
+  request:
+    params:
+      num_inference_steps: 50
+      text_guidance_scale: 4.0
+      seed: 42

@@ -9,10 +9,6 @@ inference:
     distributed_single_gpu: true
     generation_cfg:
       num_timesteps: 50
-  request:
-    task: generation
-    params:
-      num_timesteps: 50
 
 dpg_bench:
   prompts_dir: eval/generation/dpg_bench/prompts

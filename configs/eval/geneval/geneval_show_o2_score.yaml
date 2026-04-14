@@ -23,8 +23,3 @@ geneval:
 inference:
   backbone: show-o2
   backbone_cfg: {}
-  request:
-    params:
-      guidance_scale: 3.0
-      generation_timesteps: 50
-      batch_size: 1

@@ -87,6 +87,11 @@ def _extract_saved_path(result: Any, fallback_dir: Path, prompt_id: int) -> str:
                 p = Path(val)
                 if p.is_file():
                     return str(p)
+        imgs = result.get("images")
+        if isinstance(imgs, list) and imgs and isinstance(imgs[0], str) and imgs[0]:
+            p = Path(imgs[0])
+            if p.is_file():
+                return str(p)
         if fallback_dir.is_dir():
             img_exts = {".png", ".jpg", ".jpeg", ".webp"}
             candidates = sorted(

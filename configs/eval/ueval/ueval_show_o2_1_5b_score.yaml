@@ -6,12 +6,9 @@ inference:
   backbone_cfg:
     vae_path: ${UMM_MODEL_CACHE}/show_o2/Wan2.1_VAE.pth
     show_o_root: ${UMM_CODEBASE}/model/Show-o
-  request:
-    params: {}
-
 ueval:
   mode: score
-  hf_dataset: primerL/UEval-all
+  hf_dataset: zlab-princeton/UEval
   local_cache: ${UMM_DATASETS}/ueval/UEval
   domains: all
   out_dir: output/ueval/show_o2_1_5b

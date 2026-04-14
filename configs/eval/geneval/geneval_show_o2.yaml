@@ -1,6 +1,5 @@
 eval:
   benchmark: geneval
-
 geneval:
   geneval_root: ${UMM_CODEBASE}/model/geneval
   metadata_path: ${UMM_CODEBASE}/model/geneval/prompts/evaluation_metadata.jsonl
@@ -27,8 +26,7 @@ inference:
     show_o_root: ${UMM_CODEBASE}/model/Show-o
     seed: 42
     torch_dtype: bfloat16
-  request:
-    params:
+    generation_cfg:
       guidance_scale: 3.0
       generation_timesteps: 50
       batch_size: 1

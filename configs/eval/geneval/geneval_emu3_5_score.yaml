@@ -24,5 +24,3 @@ inference:
   backbone: emu3_5
   backbone_cfg:
     emu3_5_root: ${UMM_CODEBASE}/model/Emu3.5
-  request:
-    params: {}

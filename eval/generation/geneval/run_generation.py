@@ -88,7 +88,7 @@ def _extract_saved_path(result: Any, fallback_dir: Path) -> str:
     from PIL import Image
 
     if isinstance(result, dict):
-        for key in ("saved_paths", "output_path", "image_path"):
+        for key in ("saved_paths", "output_path", "image_path", "image_paths"):
             val = result.get(key)
             if isinstance(val, list) and val and isinstance(val[0], str) and val[0]:
                 p = Path(val[0])
@@ -105,11 +105,16 @@ def _extract_saved_path(result: Any, fallback_dir: Path) -> str:
             img.save(str(out_path), format="PNG")
             return str(out_path)
         imgs = result.get("images")
-        if isinstance(imgs, list) and imgs and isinstance(imgs[0], Image.Image):
-            out_path = fallback_dir / "generated.png"
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            imgs[0].save(str(out_path), format="PNG")
-            return str(out_path)
+        if isinstance(imgs, list) and imgs:
+            if isinstance(imgs[0], str) and imgs[0]:
+                p = Path(imgs[0])
+                if p.is_file():
+                    return str(p)
+            elif isinstance(imgs[0], Image.Image):
+                out_path = fallback_dir / "generated.png"
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                imgs[0].save(str(out_path), format="PNG")
+                return str(out_path)
     if isinstance(result, Image.Image):
         out_path = fallback_dir / "generated.png"
         out_path.parent.mkdir(parents=True, exist_ok=True)

@@ -1,6 +1,5 @@
 eval:
   benchmark: geneval
-
 geneval:
   mode: generate  # full | generate | score
   metadata_path: ${UMM_CODEBASE}/model/geneval/prompts/evaluation_metadata.jsonl
@@ -30,7 +29,6 @@ inference:
     gpu_memory_utilization: 0.7
     classifier_free_guidance: 5.0
     image_area: 1048576
-  request:
-    params:
+    generation_cfg:
       max_new_tokens: 5120
       classifier_free_guidance: 5.0

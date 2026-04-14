@@ -397,12 +397,26 @@ def _previous_images_missing(
         return True
 
 
+def _is_cuda_fatal(exc: Exception) -> bool:
+    """Check if exception indicates an unrecoverable CUDA error."""
+    msg = str(exc).lower()
+    return any(k in msg for k in (
+        "device-side assert",
+        "cuda error",
+        "cublas",
+        "cudnn",
+    ))
+
+
 def _write_result(case_dir: Path, record: Dict[str, Any]) -> None:
     (case_dir / "result.json").write_text(
         json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except RuntimeError:
+        pass
 
 
 def _write_csv(path: Path, header: List[str], rows: List[List[Any]]) -> None:
@@ -1153,6 +1167,9 @@ def run_task_maze(
                     ),
                     params=request_params,
                 )
+                # Truncate step text to prevent context overflow in downstream
+                # diffusion model (OmniGen2 axes_lens[0]=1024 hard limit).
+                step_text = (step_text or "")[:200]
                 add_text(ctx, step_text)
 
                 # Generate the visual state after the move
@@ -1191,6 +1208,12 @@ def run_task_maze(
             record["errors"].extend([f"{type(exc).__name__}: {exc}", traceback.format_exc(limit=3)])
             summary["count_error"] += 1
             manifest_rows.append([mid, str(step0), "", f"[ERROR] {exc}"])
+            if _is_cuda_fatal(exc):
+                print(f"[uni_mmmu generation] CUDA fatal error in task '{task_name}', "
+                      f"skipping remaining cases: {exc}")
+                _write_result(case_dir, record)
+                summary["per_item"].append(record)
+                break
 
         _write_result(case_dir, record)
         summary["per_item"].append(record)
@@ -1413,6 +1436,9 @@ def run_task_sliding(
                     ),
                     params=request_params,
                 )
+                # Truncate step text to prevent context overflow in downstream
+                # diffusion model (OmniGen2 axes_lens[0]=1024 hard limit).
+                step_text = (step_text or "")[:200]
                 add_text(ctx, step_text)
 
                 step_out = cand_dir / f"{stem}_step_{i:04d}.png"
@@ -1449,6 +1475,12 @@ def run_task_sliding(
             record["errors"].extend([f"{type(exc).__name__}: {exc}", traceback.format_exc(limit=3)])
             summary["count_error"] += 1
             manifest_rows.append([case_name, init_png, final_png, "", f"[ERROR] {exc}"])
+            if _is_cuda_fatal(exc):
+                print(f"[uni_mmmu generation] CUDA fatal error in task 'sliding', "
+                      f"skipping remaining cases: {exc}")
+                _write_result(case_dir, record)
+                summary["per_item"].append(record)
+                break
 
         _write_result(case_dir, record)
         summary["per_item"].append(record)
@@ -1613,6 +1645,12 @@ def run_task_code_rendering(
             record["errors"].extend([f"{type(exc).__name__}: {exc}", traceback.format_exc(limit=3)])
             summary["count_error"] += 1
             manifest_rows.append([idx, sid, diff, str(svg_rel), "", "", f"[ERROR] {exc}"])
+            if _is_cuda_fatal(exc):
+                print(f"[uni_mmmu generation] CUDA fatal error in task 'code_rendering', "
+                      f"skipping remaining cases: {exc}")
+                _write_result(case_dir, record)
+                summary["per_item"].append(record)
+                break
 
         _write_result(case_dir, record)
         summary["per_item"].append(record)
@@ -1801,8 +1839,11 @@ def main() -> int:
 
     # Free pipeline GPU memory
     del pipeline
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except RuntimeError:
+        pass
 
     # Write overall summary
     summary_path = out_dir / "overall_summary.json"

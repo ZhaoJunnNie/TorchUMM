@@ -1,0 +1,29 @@
+eval:
+  benchmark: ueval
+
+inference:
+  backbone: bagel
+  backbone_cfg:
+    model_path: ${UMM_POST_TRAIN_MODEL_CACHE}/post_train/unicot/merge/
+    bagel_root: ${UMM_CODEBASE}/model/Bagel
+    max_mem_per_gpu: "80GiB"
+    offload_folder: ./tmp/offload
+    seed: 42
+    generation_cfg:
+      cfg_text_scale: 4.0
+      cfg_img_scale: 1.0
+      num_timesteps: 50
+    understanding_cfg:
+      max_think_token_n: 1000
+      do_sample: false
+  request:
+    params: {}
+
+ueval:
+  mode: generate
+  hf_dataset: zlab-princeton/UEval
+  local_cache: ${UMM_DATASETS}/ueval/UEval
+  domains: all
+  out_dir: output/ueval/bagel_unicot
+  max_samples: 0
+  resume: true

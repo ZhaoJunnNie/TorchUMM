@@ -51,7 +51,7 @@ class OvisU1Backbone:
             "seed": 42,
         }
         self.default_understanding_cfg: dict[str, Any] = {
-            "max_new_tokens": 4096,
+            "max_new_tokens": 5120,
             "do_sample": False,
         }
 
@@ -88,6 +88,10 @@ class OvisU1Backbone:
 
     def _load_model(self) -> None:
         from transformers import AutoModelForCausalLM
+
+        # Disable cuDNN to avoid CUDNN_STATUS_NOT_INITIALIZED caused by
+        # conflicting cu12/cu13 nvidia packages in this environment.
+        torch.backends.cudnn.enabled = False
 
         print(f"[ovis_u1] loading model from {self.model_path} ...", flush=True)
         model, _ = AutoModelForCausalLM.from_pretrained(

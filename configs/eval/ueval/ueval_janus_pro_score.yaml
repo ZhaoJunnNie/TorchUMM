@@ -4,14 +4,10 @@ eval:
 inference:
   backbone: janus_pro
   backbone_cfg: {}
-  request:
-    params:
-      max_new_tokens: 512
-      parallel_size: 4
 
 ueval:
   mode: score
-  hf_dataset: primerL/UEval-all
+  hf_dataset: zlab-princeton/UEval
   domains: all
   out_dir: output/ueval/janus_pro
   max_samples: 0

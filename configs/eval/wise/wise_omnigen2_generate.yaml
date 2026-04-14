@@ -1,6 +1,5 @@
 eval:
   benchmark: wise
-
 wise:
   data_root: eval/generation/wise/data
   out_dir: output/wise/omnigen2
@@ -22,8 +21,7 @@ inference:
     omnigen2_root: ${UMM_CODEBASE}/model/OmniGen2
     device: "cuda:0"
     torch_dtype: bfloat16
-  request:
-    params:
+    generation_cfg:
       num_inference_steps: 50
       text_guidance_scale: 4.0
       seed: 42

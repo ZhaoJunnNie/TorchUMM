@@ -4,9 +4,6 @@ import pickle
 import re
 import time
 
-import cv2
-import openai
-from word2number import w2n
 
 openai_client = None
 
@@ -53,6 +50,7 @@ def save_json(data, path):
 
 
 def save_array_img(path, image):
+    import cv2
     cv2.imwrite(path, image)
 
 
@@ -71,6 +69,7 @@ def contains_number_word(text):
         if word in ignore_words:
             continue
         try:
+            from word2number import w2n
             w2n.word_to_num(word)
             return True  # If the word can be converted to a number, return True
         except ValueError:
@@ -168,6 +167,7 @@ def get_chat_response(promot, api_key, model='gpt-3.5-turbo', temperature=0, max
     global openai_client
     if openai_client is None:
         print(f'{api_key=}')
+        import openai
         openai_client = openai.OpenAI(api_key=api_key, http_client=http_client)
 
     messages = [

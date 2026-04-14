@@ -10,6 +10,7 @@ from typing import Any, Iterable
 
 from datasets import concatenate_datasets, load_dataset
 from PIL import Image
+from tqdm import tqdm
 
 from umm.core.config import load_config
 from umm.inference import InferencePipeline
@@ -52,6 +53,14 @@ def _extract_text(output: Any) -> str:
                 text = _extract_text(item)
                 if text:
                     return text
+        # Handle adapters that return {"understandings": [{"response": "..."}]}
+        for list_key in ("understandings",):
+            container = output.get(list_key)
+            if isinstance(container, list):
+                for item in container:
+                    text = _extract_text(item)
+                    if text:
+                        return text
     if isinstance(output, list):
         for item in output:
             text = _extract_text(item)
@@ -216,42 +225,65 @@ def run_mmmu_eval_command(args: Any) -> int:
             split=split,
             cache_dir=str(cache_dir_path),
         )
-        outputs = []
-        for idx, sample in enumerate(dataset, start=1):
-            data = data_utils.process_single_sample(sample)
-            question = str(data["question"]).strip()
-            question_type = str(data["question_type"])
-            options = eval(data["options"]) if isinstance(data.get("options"), str) else data.get("options", [])
-            if not isinstance(options, list):
-                options = []
 
-            prompt = _build_prompt(question, question_type, options, prompt_cfg)
-            index2ans, all_choices = data_utils.get_multi_choice_info(options) if options else ({}, [])
+        # Resume: load checkpoint JSONL if exists
+        checkpoint_jsonl = out_dir / f"{ds_name}_checkpoint.jsonl"
+        done_ids: set[str] = set()
+        outputs: list[dict[str, Any]] = []
+        if checkpoint_jsonl.exists():
+            with checkpoint_jsonl.open("r", encoding="utf-8") as reader:
+                for line in reader:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    item = json.loads(line)
+                    outputs.append(item)
+                    done_ids.add(str(item.get("data_id", "")))
+            print(f"[mmmu] resume: {len(done_ids)} done, skipping completed items", flush=True)
 
-            image_paths = _coerce_image_paths(
-                data.get("image", []),
-                image_dir=image_dir,
-                data_id=str(data["id"]),
-                max_images=max_images,
-            )
+        total = len(dataset)
+        remaining = total - len(done_ids)
+        print(f"[mmmu] {ds_name}: {total} total, {len(done_ids)} done, {remaining} remaining", flush=True)
 
-            payload = {
-                "backbone": backbone,
-                "task": "understanding",
-                "prompt": prompt,
-                "images": image_paths,
-                "params": request_params,
-                "metadata": {"question_type": question_type, "data_id": str(data["id"])},
-            }
-            output = pipeline.run(payload)
-            response = _extract_text(output)
-            if question_type == "multiple-choice" and all_choices and index2ans:
-                pred = eval_utils.parse_multi_choice_response(response, all_choices, index2ans)
-            else:
-                pred = response
+        with checkpoint_jsonl.open("a", encoding="utf-8") as ckpt_writer:
+            for idx, sample in enumerate(tqdm(dataset, desc=f"mmmu/{ds_name}", file=sys.stdout), start=1):
+                data = data_utils.process_single_sample(sample)
+                data_id = str(data["id"])
+                if data_id in done_ids:
+                    continue
 
-            outputs.append(
-                {
+                question = str(data["question"]).strip()
+                question_type = str(data["question_type"])
+                options = eval(data["options"]) if isinstance(data.get("options"), str) else data.get("options", [])
+                if not isinstance(options, list):
+                    options = []
+
+                prompt = _build_prompt(question, question_type, options, prompt_cfg)
+                index2ans, all_choices = data_utils.get_multi_choice_info(options) if options else ({}, [])
+
+                image_paths = _coerce_image_paths(
+                    data.get("image", []),
+                    image_dir=image_dir,
+                    data_id=data_id,
+                    max_images=max_images,
+                )
+
+                payload = {
+                    "backbone": backbone,
+                    "task": "understanding",
+                    "prompt": prompt,
+                    "images": image_paths,
+                    "params": request_params,
+                    "metadata": {"question_type": question_type, "data_id": data_id},
+                }
+                output = pipeline.run(payload)
+                response = _extract_text(output)
+                if question_type == "multiple-choice" and all_choices and index2ans:
+                    pred = eval_utils.parse_multi_choice_response(response, all_choices, index2ans)
+                else:
+                    pred = response
+
+                item = {
                     "question": question,
                     "answer": pred,
                     "gt_answers": data.get("answer"),
@@ -260,10 +292,12 @@ def run_mmmu_eval_command(args: Any) -> int:
                     "prompt": prompt,
                     "raw_response": response,
                 }
-            )
+                outputs.append(item)
+                ckpt_writer.write(json.dumps(item) + "\n")
+                ckpt_writer.flush()
 
-            if max_samples > 0 and idx >= max_samples:
-                break
+                if max_samples > 0 and len(outputs) >= max_samples:
+                    break
 
         time_prefix = time.strftime("%y%m%d%H%M%S", time.localtime())
         output_json = out_dir / f"{ds_name}_{time_prefix}.json"
@@ -274,6 +308,10 @@ def run_mmmu_eval_command(args: Any) -> int:
         with output_jsonl.open("w", encoding="utf-8") as writer:
             for item in outputs:
                 writer.write(json.dumps(item) + "\n")
+
+        # Clean up checkpoint after successful completion
+        if checkpoint_jsonl.exists():
+            checkpoint_jsonl.unlink()
 
         summary[f"{ds_name}_output_path"] = str(output_json)
         summary[f"{ds_name}_output_jsonl"] = str(output_jsonl)

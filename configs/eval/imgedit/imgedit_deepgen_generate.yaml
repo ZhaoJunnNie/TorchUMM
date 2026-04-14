@@ -14,7 +14,6 @@ imgedit:
   vlm_eval:
     backbone: qwen25vl
     model_path: ${UMM_MODEL_CACHE}/evaluator/Qwen2.5-VL-72B-Instruct
-
 inference:
   backbone: deepgen
   backbone_cfg:
@@ -22,7 +21,3 @@ inference:
     device: "cuda:0"
     torch_dtype: bfloat16
     seed: 42
-  request:
-    params:
-      num_inference_steps: 50
-      guidance_scale: 4.0
