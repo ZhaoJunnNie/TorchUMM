@@ -13,7 +13,10 @@
 
 </p>
 
----
+<p align="center">
+  <a href="https://arxiv.org/abs/2604.10784">📄 Paper</a>
+</p>
+
 
 ## Table of Contents
 
@@ -923,13 +926,16 @@ PYTHONPATH=src python -m umm.cli.main train --config configs/posttrain/bagel_sft
 
 If you find TorchUMM useful in your research, please consider citing:
 
-<!--
+
 ```bibtex
-@misc{torchumm2025,
-  title   = {TorchUMM: Unified Multimodal Model Toolkit},
-  author  = {TorchUMM Team},
-  year    = {2025},
-  url     = {https://github.com/<your-org>/TorchUMM}
+@misc{luo2026torchummunifiedmultimodalmodel,
+      title={TorchUMM: A Unified Multimodal Model Codebase for Evaluation, Analysis, and Post-training}, 
+      author={Yinyi Luo and Wenwen Wang and Hayes Bai and Hongyu Zhu and Hao Chen and Pan He and Marios Savvides and Sharon Li and Jindong Wang},
+      year={2026},
+      eprint={2604.10784},
+      archivePrefix={arXiv},
+      primaryClass={cs.AI},
+      url={https://arxiv.org/abs/2604.10784}, 
 }
 ```
--->
+
