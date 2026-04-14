@@ -1,0 +1,36 @@
+eval:
+  benchmark: uni_mmmu
+
+inference:
+  backbone: bagel
+  backbone_cfg:
+    model_path: /post_train_model_cache/post_train/recA/
+    checkpoint_file: model.safetensors
+    bagel_root: /workspace/model/Bagel
+    offload_folder: ./tmp/offload_bagel0
+    max_mem_per_gpu: "80GiB"
+    seed: 42
+    generation_cfg:
+      cfg_text_scale: 4.0
+      cfg_img_scale: 1.0
+      num_timesteps: 50
+    editing_cfg:
+      cfg_text_scale: 4.0
+      cfg_img_scale: 2.0
+      num_timesteps: 50
+    understanding_cfg:
+      max_think_token_n: 1000
+      do_sample: false
+
+uni_mmmu:
+  data_root: /datasets/uni_mmmu/Uni-MMMU-Eval/data
+  tasks: all
+  mode: score
+  out_dir: /outputs/uni_mmmu/bagel_recA
+  max_samples: 0
+  resume: true
+  score_output_path: /outputs/uni_mmmu/bagel_recA/overall_summary.json
+  scoring:
+    qwen3_model: /model_cache/evaluator/Qwen3-32B
+    qwen2_5_vl_model: /model_cache/evaluator/Qwen2.5-VL-72B-Instruct
+    dreamsim_cache: /model_cache/dreamsim

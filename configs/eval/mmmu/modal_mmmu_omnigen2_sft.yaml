@@ -1,0 +1,25 @@
+eval:
+  benchmark: mmmu
+
+inference:
+  backbone: omnigen2
+  backbone_cfg:
+    model_path: /post_train_model_cache/post_train/omnigen2/
+    omnigen2_root: /workspace/model/OmniGen2
+    device: cuda:0
+    device_map: cuda:0
+    torch_dtype: bfloat16
+    enable_cpu_offload: false
+    enable_sequential_cpu_offload: false
+
+    understanding_cfg:
+      max_new_tokens: 2048
+
+mmmu:
+  root: MMMU/MMMU
+  cache_dir: /workspace/data/MMMU
+  datasets: [MMMU_validation]
+  out_dir: /output-apr4/mmmu/omnigen2_sft
+  score_output_path: /output-apr4/mmmu/omnigen2_sft/summary.json
+  run_calculation: true
+  max_images: 1

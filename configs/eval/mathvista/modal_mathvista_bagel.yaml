@@ -1,0 +1,28 @@
+eval:
+  benchmark: mathvista
+
+inference:
+  backbone: bagel
+  backbone_cfg:
+    model_path: /model_cache/bagel/BAGEL-7B-MoT
+    bagel_root: /workspace/model/Bagel
+    max_mem_per_gpu: 80GiB
+    offload_folder: ./tmp/offload
+    seed: 42
+
+    understanding_cfg:
+      max_think_token_n: 1000
+      do_sample: false
+
+mathvista:
+  score_model: wise
+  resume: true
+  gt_file: /datasets/mathvista/annot_testmini.json
+  root: AI4Math/MathVista
+  cache_dir: /datasets/mathvista
+  datasets: [MathVista_testmini]
+  out_dir: /outputs/mathvista/bagel
+  score_output_path: /outputs/mathvista/bagel/summary.json
+  llm_extract:
+    model_path: /model_cache/evaluator/Qwen3-32B-AWQ
+    max_new_tokens: 2048

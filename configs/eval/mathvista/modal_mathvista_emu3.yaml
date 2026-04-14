@@ -1,0 +1,29 @@
+eval:
+  benchmark: mathvista
+
+inference:
+  backbone: emu3
+  backbone_cfg:
+    model_path: /model_cache/emu3/Emu3-Chat
+    emu_root: /workspace/model/Emu3
+    vq_hub: /model_cache/emu3/Emu3-VisionTokenizer
+    device_map: cuda:0
+    device: cuda:0
+    torch_dtype: bfloat16
+    attn_implementation: flash_attention_2
+
+    generation_cfg:
+      max_new_tokens: 1024
+
+mathvista:
+  score_model: wise
+  resume: true
+  gt_file: /datasets/mathvista/annot_testmini.json
+  root: AI4Math/MathVista
+  cache_dir: /datasets/mathvista
+  datasets: [MathVista_testmini]
+  out_dir: /outputs/mathvista/emu3
+  score_output_path: /outputs/mathvista/emu3/summary.json
+  llm_extract:
+    model_path: /model_cache/evaluator/Qwen3-32B-AWQ
+    max_new_tokens: 2048

@@ -1,0 +1,21 @@
+eval:
+  benchmark: mmbench
+
+inference:
+  backbone: show_o
+  backbone_cfg:
+    version: 1
+    model_path: /model_cache/show_o/show-o-w-clip-vit-512x512
+    show_o_root: /workspace/model/Show-o
+    vq_model_path: /model_cache/show_o/magvitv2
+    seed: 42
+    torch_dtype: bfloat16
+    understanding_cfg:
+      max_new_tokens: 10
+      do_sample: false
+      use_clip_vit: true
+
+mmbench:
+  datasets: [mmbench_dev_20230712]
+  out_dir: /output-apr4/mmbench/show_o-underN10
+  score_output_path: /output-apr4/mmbench/show_o-underN10/summary.json

@@ -1,0 +1,24 @@
+inference:
+  backbone: deepgen
+  backbone_cfg:
+    model_path: /model_cache/deepgen/DeepGen-1.0-diffusers
+    device: "cuda:0"
+    torch_dtype: bfloat16
+    seed: 42
+
+    generation_cfg:
+      num_inference_steps: 50
+      guidance_scale: 7.5
+      height: 512
+      width: 512
+
+dpg_bench:
+  prompts_dir: /workspace/eval/generation/dpg_bench/prompts
+  image_output_dir: /outputs/dpg_bench/deepgen
+  resolution: 512
+  eval_python: python
+  score_output_path: /outputs/dpg_bench/deepgen/final_score.json
+  images_per_prompt: 4
+  gpus: 1
+  overwrite: false
+  skip_eval: false

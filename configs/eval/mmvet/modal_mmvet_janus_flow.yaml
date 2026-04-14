@@ -1,0 +1,23 @@
+eval:
+  benchmark: mmvet
+
+inference:
+  backbone: janus_flow
+  backbone_cfg:
+    model_path: /model_cache/janus_flow/JanusFlow-1.3B
+    janus_root: /workspace/src/umm/backbones/janus_flow/Janus
+    vae_path: /model_cache/janus_flow/sdxl-vae
+    seed: 42
+    torch_dtype: bfloat16
+    understanding_cfg:
+      max_new_tokens: 2048
+      do_sample: false
+      use_cache: true
+
+mmvet:
+  datasets: [mmvet]
+  out_dir: /outputs/mmvet/janus_flow
+  score_output_path: /outputs/mmvet/janus_flow/summary.json
+  dataset_paths:
+    image_root: /datasets/mmvet/images
+    question: /datasets/mmvet/llava-mm-vet.jsonl

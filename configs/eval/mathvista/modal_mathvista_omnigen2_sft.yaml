@@ -1,0 +1,34 @@
+eval:
+  benchmark: mathvista
+
+inference:
+  backbone: omnigen2
+  backbone_cfg:
+    model_path: /post_train_model_cache/post_train/omnigen2/
+    omnigen2_root: /workspace/model/OmniGen2
+    device: cuda:0
+    device_map: cuda:0
+    torch_dtype: bfloat16
+    enable_cpu_offload: false
+    enable_sequential_cpu_offload: false
+
+    generation_cfg:
+      num_inference_steps: 50
+      seed: 42
+
+    understanding_cfg:
+      max_new_tokens: 2048
+
+mathvista:
+  score_model: wise
+  score_gpu: "A100-80GB"
+  resume: true
+  gt_file: /datasets/mathvista/annot_testmini.json
+  root: AI4Math/MathVista
+  cache_dir: /datasets/mathvista
+  datasets: [MathVista_testmini]
+  out_dir: /output-apr4/mathvista/omnigen2_sft
+  score_output_path: /output-apr4/mathvista/omnigen2_sft/summary.json
+  llm_extract:
+    model_path: /model_cache/evaluator/Qwen3-32B-AWQ
+    max_new_tokens: 2048

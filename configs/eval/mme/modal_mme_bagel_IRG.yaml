@@ -1,0 +1,22 @@
+eval:
+  benchmark: mme
+
+inference:
+  backbone: bagel
+  backbone_cfg:
+    model_path: /post_train_model_cache/post_train/IRG/
+    bagel_root: /workspace/model/Bagel
+    max_mem_per_gpu: 80GiB
+    offload_folder: ./tmp/offload
+    seed: 42
+
+    understanding_cfg:
+      max_think_token_n: 1000
+      do_sample: false
+
+mme:
+  root: /workspace/src/umm/eval/internvl_chat/eval/mme/Your_Results
+  image_root: /workspace/data/mme/MME_Benchmark_release_version
+  out_dir: /outputs/mme/bagel_IRG
+  score_output_path: /outputs/mme/bagel_IRG/summary.json
+  run_calculation: true

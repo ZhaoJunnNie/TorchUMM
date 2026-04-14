@@ -1,0 +1,35 @@
+eval:
+  benchmark: ueval
+
+inference:
+  backbone: mmada
+  backbone_cfg:
+    model_path: /model_cache/mmada/MMaDA-8B-Base
+    mmada_root: /workspace/model/MMaDA
+    vq_model_path: /model_cache/mmada/magvitv2
+    seed: 42
+    understanding_cfg:
+      max_new_tokens: 5120
+      steps: 256
+      block_length: 128
+      do_sample: false
+
+ueval:
+  mode: generate
+  hf_dataset: zlab-princeton/UEval
+  local_cache: /datasets/ueval/UEval
+  domains: all
+  out_dir: /output-apr4/ueval/mmada-underN512
+  max_samples: 0
+  resume: true
+  score_output_path: /output-apr4/ueval/mmada-underN512/eval_results.json
+
+  scoring:
+    enabled: true
+    vl_model: /model_cache/evaluator/Qwen2.5-VL-72B-Instruct
+    text_model: /model_cache/evaluator/Qwen3-32B
+  gemini_eval:
+    enabled: false
+
+  score_model: wise
+  score_gpu: "A100-80GB:3"

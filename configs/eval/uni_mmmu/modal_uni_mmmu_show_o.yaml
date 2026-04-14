@@ -1,0 +1,27 @@
+eval:
+  benchmark: uni_mmmu
+
+inference:
+  backbone: show_o
+  backbone_cfg:
+    model_path: /model_cache/show_o/show-o-w-clip-vit-512x512
+    show_o_root: /workspace/model/Show-o
+    vq_model_path: /model_cache/show_o/magvitv2
+    version: 1
+    seed: 42
+    torch_dtype: bfloat16
+    generation_cfg:
+      guidance_scale: 3.0
+      generation_timesteps: 50
+    understanding_cfg:
+      max_new_tokens: 2048
+      do_sample: false
+      use_clip_vit: true
+
+uni_mmmu:
+  data_root: /datasets/uni_mmmu/Uni-MMMU-Eval/data
+  tasks: [science, math_geo, code_rendering]  # no editing support
+  out_dir: /outputs/uni_mmmu/show_o
+  max_samples: 0
+  resume: true
+  score_output_path: /outputs/uni_mmmu/show_o/overall_summary.json

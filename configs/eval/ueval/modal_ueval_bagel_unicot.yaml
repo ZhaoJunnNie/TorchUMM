@@ -1,0 +1,37 @@
+eval:
+  benchmark: ueval
+
+inference:
+  backbone: bagel
+  backbone_cfg:
+    model_path: /post_train_model_cache/post_train/unicot/merge/
+    bagel_root: /workspace/model/Bagel
+    max_mem_per_gpu: "80GiB"
+    offload_folder: ./tmp/offload
+    seed: 42
+    generation_cfg:
+      cfg_text_scale: 4.0
+      cfg_img_scale: 1.0
+      num_timesteps: 50
+    understanding_cfg:
+      max_think_token_n: 1000
+      do_sample: false
+ueval:
+  mode: generate
+  hf_dataset: zlab-princeton/UEval
+  local_cache: /datasets/ueval/UEval
+  domains: all
+  out_dir: /output-apr4/ueval/bagel_unicot-underN5120
+  max_samples: 0
+  resume: true
+  score_output_path: /output-apr4/ueval/bagel_unicot-underN5120/eval_results.json
+
+  scoring:
+    enabled: true
+    vl_model: /model_cache/evaluator/Qwen2.5-VL-72B-Instruct
+    text_model: /model_cache/evaluator/Qwen3-32B
+  gemini_eval:
+    enabled: false
+
+  score_model: wise
+  score_gpu: "A100-80GB:3"

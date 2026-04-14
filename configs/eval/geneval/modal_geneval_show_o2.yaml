@@ -1,0 +1,34 @@
+eval:
+  benchmark: geneval
+geneval:
+  geneval_root: /workspace/model/geneval
+  metadata_path: /workspace/model/geneval/prompts/evaluation_metadata.jsonl
+  out_dir: /outputs/geneval/show_o2
+  images_per_prompt: 4
+  max_samples: 0
+  resume: true
+  score_output_path: /outputs/geneval/show_o2/summary.json
+  mode: full  # full | generate | score
+  score_model: geneval  # detection scoring runs in geneval image (needs mmdetection)
+  score_gpu: "A100-80GB"
+  vlm_eval:
+    enabled: false
+    max_new_tokens: 512
+    max_retries: 2
+  detection_eval:
+    enabled: true
+    model_path: /model_cache/evaluator
+  run_scoring: true
+
+inference:
+  backbone: show-o2
+  backbone_cfg:
+    model_path: /model_cache/show_o2/show-o2-7B
+    show_o_root: /workspace/model/Show-o
+    vae_path: /model_cache/show_o2/Wan2.1_VAE.pth
+    seed: 42
+    torch_dtype: bfloat16
+    generation_cfg:
+      guidance_scale: 3.0
+      generation_timesteps: 50
+      batch_size: 1

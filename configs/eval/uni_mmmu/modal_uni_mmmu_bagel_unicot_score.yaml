@@ -1,0 +1,31 @@
+# NOTE: unicot checkpoint is in PEFT format (not standard safetensors).
+#   - Keys prefixed with "base_model.model." instead of bare names
+#   - Contains lora_A/lora_B weights + base_layer weights (248 LoRA pairs)
+#   - LoRA rank: 256, lora_alpha: 512, scaling: 2.0, dtype: F32
+#   - Merge formula: weight = base_layer + lora_B @ lora_A * 2.0
+#   - Requires PEFT-aware loading or in-memory merge before dispatch
+#   - Total size: ~61.66 GB (full base + LoRA, not adapter-only)
+
+eval:
+  benchmark: uni_mmmu
+
+inference:
+  backbone: bagel
+  backbone_cfg:
+    model_path: /post_train_model_cache/post_train/unicot/
+    checkpoint_file: model.safetensors
+    lora_scaling: 2.0  # lora_alpha(512) / lora_rank(256)
+    bagel_root: /workspace/model/Bagel
+
+uni_mmmu:
+  data_root: /datasets/uni_mmmu/Uni-MMMU-Eval/data
+  tasks: all
+  mode: score
+  out_dir: /outputs/uni_mmmu/bagel_unicot
+  max_samples: 0
+  resume: true
+  score_output_path: /outputs/uni_mmmu/bagel_unicot/overall_summary.json
+  scoring:
+    qwen3_model: /model_cache/evaluator/Qwen3-32B
+    qwen2_5_vl_model: /model_cache/evaluator/Qwen2.5-VL-72B-Instruct
+    dreamsim_cache: /model_cache/dreamsim

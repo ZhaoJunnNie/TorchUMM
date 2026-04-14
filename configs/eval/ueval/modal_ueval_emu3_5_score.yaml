@@ -1,0 +1,25 @@
+eval:
+  benchmark: ueval
+
+inference:
+  backbone: emu3_5
+  backbone_cfg: {}
+ueval:
+  hf_dataset: zlab-princeton/UEval
+  local_cache: /datasets/ueval/UEval
+  domains: all
+  out_dir: /output-apr4/ueval/emu3_5-underN32768
+  max_samples: 0
+  resume: true
+  score_output_path: /output-apr4/ueval/emu3_5-underN32768/summary.json
+  ueval_root: /workspace/model/UEval
+  score_only: true
+  scoring:
+    enabled: true
+    vl_model: /model_cache/evaluator/Qwen2.5-VL-72B-Instruct
+    text_model: /model_cache/evaluator/Qwen3-32B
+  gemini_eval:
+    enabled: false
+
+  score_model: wise
+  score_gpu: "A100-80GB:3"

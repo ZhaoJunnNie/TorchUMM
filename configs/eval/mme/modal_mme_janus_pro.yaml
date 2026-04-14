@@ -1,0 +1,22 @@
+eval:
+  benchmark: mme
+
+inference:
+  backbone: janus_pro
+  backbone_cfg:
+    model_path: /model_cache/janus_pro/Janus-Pro-7B
+    janus_root: /workspace/src/umm/backbones/janus_pro/Janus
+    seed: 42
+    torch_dtype: bfloat16
+    understanding_cfg:
+      max_new_tokens: 2048
+      do_sample: false
+      use_cache: true
+
+mme:
+  root: /datasets/mme/Your_Results
+  image_root: /datasets/mme/MME_Benchmark_release_version
+  out_dir: /outputs/mme/janus_pro
+  score_output_path: /outputs/mme/janus_pro/summary.json
+  run_calculation: true
+

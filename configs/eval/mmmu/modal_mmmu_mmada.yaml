@@ -1,0 +1,24 @@
+eval:
+  benchmark: mmmu
+
+inference:
+  backbone: mmada
+  backbone_cfg:
+    model_path: /model_cache/mmada/MMaDA-8B-Base
+    mmada_root: /workspace/model/MMaDA
+    vq_model_path: /model_cache/mmada/magvitv2
+    seed: 42
+
+    understanding_cfg:
+      max_new_tokens: 2048
+      steps: 256
+      block_length: 128
+
+mmmu:
+  root: MMMU/MMMU
+  cache_dir: /datasets/mmmu
+  datasets: [MMMU_validation]
+  out_dir: /outputs/mmmu/mmada
+  score_output_path: /outputs/mmmu/mmada/summary.json
+  run_calculation: true
+  max_images: 1

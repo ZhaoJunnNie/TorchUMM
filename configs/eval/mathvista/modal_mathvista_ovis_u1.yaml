@@ -1,0 +1,23 @@
+eval:
+  benchmark: mathvista
+
+inference:
+  backbone: ovis_u1
+  backbone_cfg:
+    model_path: /model_cache/ovis_u1/Ovis-U1-3B
+    understanding_cfg:
+      max_new_tokens: 5120
+      do_sample: false
+
+mathvista:
+  score_model: wise
+  resume: true
+  gt_file: /datasets/mathvista/annot_testmini.json
+  root: AI4Math/MathVista
+  cache_dir: /datasets/mathvista
+  datasets: [MathVista_testmini]
+  out_dir: /output-apr4/mathvista/ovis_u1-underN5120
+  score_output_path: /output-apr4/mathvista/ovis_u1-underN5120/summary.json
+  llm_extract:
+    model_path: /model_cache/evaluator/Qwen3-32B-AWQ
+    max_new_tokens: 2048

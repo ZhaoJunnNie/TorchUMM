@@ -1,0 +1,35 @@
+eval:
+  benchmark: geneval
+
+geneval:
+  geneval_root: /workspace/model/geneval
+  metadata_path: /workspace/model/geneval/prompts/evaluation_metadata.jsonl
+  out_dir: /outputs/geneval/bagel_IRG
+  images_per_prompt: 4
+  max_samples: 0
+  resume: true
+  score_output_path: /outputs/geneval/bagel_IRG/summary.json
+  mode: full  # full | generate | score
+  vlm_eval:
+    enabled: false
+    max_new_tokens: 512
+    max_retries: 2
+  detection_eval:
+    enabled: true
+    model_path: /model_cache/evaluator
+  run_scoring: true
+
+  score_model: wise
+  score_gpu: "A100-80GB"
+inference:
+  backbone: bagel
+  backbone_cfg:
+    model_path: /post_train_model_cache/post_train/IRG/
+    bagel_root: /workspace/model/Bagel
+    max_mem_per_gpu: "80GiB"
+    offload_folder: ./tmp/offload
+    seed: 42
+    generation_cfg:
+      cfg_text_scale: 4.0
+      cfg_img_scale: 1.0
+      num_timesteps: 50

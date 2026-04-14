@@ -1,0 +1,33 @@
+eval:
+  benchmark: geneval
+geneval:
+  score_model: wise
+  score_gpu: "A100-80GB"
+  geneval_root: /workspace/model/geneval
+  metadata_path: /workspace/model/geneval/prompts/evaluation_metadata.jsonl
+  out_dir: /output-apr4/geneval/omnigen2_sft
+  images_per_prompt: 4
+  max_samples: 0
+  resume: true
+  score_output_path: /output-apr4/geneval/omnigen2_sft/summary.json
+  mode: full  # full | generate | score
+  vlm_eval:
+    enabled: false
+    max_new_tokens: 512
+    max_retries: 2
+  detection_eval:
+    enabled: true
+    model_path: /model_cache/evaluator
+  run_scoring: true
+
+inference:
+  backbone: omnigen2
+  backbone_cfg:
+    model_path: /post_train_model_cache/post_train/omnigen2/
+    omnigen2_root: /workspace/model/OmniGen2
+    device: "cuda:0"
+    torch_dtype: bfloat16
+    generation_cfg:
+      num_inference_steps: 50
+      text_guidance_scale: 4.0
+      seed: 42

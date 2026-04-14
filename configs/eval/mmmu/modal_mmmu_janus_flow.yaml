@@ -1,0 +1,24 @@
+eval:
+  benchmark: mmmu
+
+inference:
+  backbone: janus_flow
+  backbone_cfg:
+    model_path: /model_cache/janus_flow/JanusFlow-1.3B
+    janus_root: /workspace/src/umm/backbones/janus_flow/Janus
+    vae_path: /model_cache/janus_flow/sdxl-vae
+    seed: 42
+    torch_dtype: bfloat16
+    understanding_cfg:
+      max_new_tokens: 2048
+      do_sample: false
+      use_cache: true
+
+mmmu:
+  root: MMMU/MMMU
+  cache_dir: /datasets/mmmu
+  datasets: [MMMU_validation]
+  out_dir: /outputs/mmmu/janus_flow
+  score_output_path: /outputs/mmmu/janus_flow/summary.json
+  run_calculation: true
+  max_images: 1

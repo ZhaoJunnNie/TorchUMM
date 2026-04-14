@@ -1,0 +1,22 @@
+eval:
+  benchmark: mme
+
+inference:
+  backbone: mmada
+  backbone_cfg:
+    model_path: /model_cache/mmada/MMaDA-8B-Base
+    mmada_root: /workspace/model/MMaDA
+    vq_model_path: /model_cache/mmada/magvitv2
+    seed: 42
+
+    understanding_cfg:
+      max_new_tokens: 2048
+      steps: 256
+      block_length: 128
+
+mme:
+  root: /datasets/mme/Your_Results
+  image_root: /datasets/mme/MME_Benchmark_release_version
+  out_dir: /outputs/mme/mmada
+  score_output_path: /outputs/mme/mmada/summary.json
+  run_calculation: true

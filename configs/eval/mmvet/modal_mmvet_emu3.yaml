@@ -1,0 +1,24 @@
+eval:
+  benchmark: mmvet
+
+inference:
+  backbone: emu3
+  backbone_cfg:
+    model_path: /model_cache/emu3/Emu3-Chat
+    emu_root: /workspace/model/Emu3
+    vq_hub: /model_cache/emu3/Emu3-VisionTokenizer
+    device_map: cuda:0
+    device: cuda:0
+    torch_dtype: bfloat16
+    attn_implementation: flash_attention_2
+
+    generation_cfg:
+      max_new_tokens: 1024
+
+mmvet:
+  datasets: [mmvet]
+  out_dir: /outputs/mmvet/emu3
+  score_output_path: /outputs/mmvet/emu3/summary.json
+  dataset_paths:
+    image_root: /workspace/data/mm-vet/mm-vet/images
+    question: /workspace/data/mm-vet/llava-mm-vet.jsonl

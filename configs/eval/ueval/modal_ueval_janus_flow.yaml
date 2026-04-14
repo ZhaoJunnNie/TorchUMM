@@ -1,0 +1,40 @@
+eval:
+  benchmark: ueval
+
+inference:
+  backbone: janus_flow
+  backbone_cfg:
+    model_path: /model_cache/janus_flow/JanusFlow-1.3B
+    janus_root: /workspace/src/umm/backbones/janus_flow/Janus
+    vae_path: /model_cache/janus_flow/sdxl-vae
+    seed: 42
+    torch_dtype: bfloat16
+    generation_cfg:
+      cfg_weight: 2.0
+      num_inference_steps: 30
+      parallel_size: 5
+      img_size: 384
+    understanding_cfg:
+      max_new_tokens: 5120
+      do_sample: false
+      use_cache: true
+
+ueval:
+  mode: generate
+  hf_dataset: zlab-princeton/UEval
+  local_cache: /datasets/ueval/UEval
+  domains: all
+  out_dir: /output-apr4/ueval/janus_flow-underN5120
+  max_samples: 0
+  resume: true
+  score_output_path: /output-apr4/ueval/janus_flow-underN5120/eval_results.json
+
+  scoring:
+    enabled: true
+    vl_model: /model_cache/evaluator/Qwen2.5-VL-72B-Instruct
+    text_model: /model_cache/evaluator/Qwen3-32B
+  gemini_eval:
+    enabled: false
+
+  score_model: wise
+  score_gpu: "A100-80GB:3"

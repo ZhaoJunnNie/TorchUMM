@@ -1,0 +1,27 @@
+eval:
+  benchmark: ueval
+
+inference:
+  backbone: mmada
+  backbone_cfg: {}
+ueval:
+  hf_dataset: zlab-princeton/UEval
+  local_cache: /datasets/ueval/UEval
+  domains: all
+  out_dir: /output-apr4/ueval/mmada-underN512
+  max_samples: 0
+  resume: true
+  score_output_path: /output-apr4/ueval/mmada-underN512/summary.json
+  ueval_root: /workspace/model/UEval
+  score_only: true
+  scoring:
+    enabled: true
+    vl_model: /model_cache/evaluator/Qwen2.5-VL-72B-Instruct
+    text_model: /model_cache/evaluator/Qwen3-32B
+    text_field: text_answer
+    image_field: image_answer
+  gemini_eval:
+    enabled: false
+
+  score_model: wise
+  score_gpu: "A100-80GB:3"

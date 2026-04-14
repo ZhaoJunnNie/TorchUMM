@@ -1,0 +1,23 @@
+eval:
+  benchmark: mmvet
+
+inference:
+  backbone: bagel
+  backbone_cfg:
+    model_path: /post_train_model_cache/post_train/IRG/
+    bagel_root: /workspace/model/Bagel
+    max_mem_per_gpu: 80GiB
+    offload_folder: ./tmp/offload
+    seed: 42
+
+    understanding_cfg:
+      max_think_token_n: 1000
+      do_sample: false
+
+mmvet:
+  datasets: [mmvet]
+  out_dir: /outputs/mmvet/bagel_IRG
+  score_output_path: /outputs/mmvet/bagel_IRG/summary.json
+  dataset_paths:
+    image_root: /workspace/data/mm-vet/mm-vet/images
+    question: /workspace/data/mm-vet/llava-mm-vet.jsonl

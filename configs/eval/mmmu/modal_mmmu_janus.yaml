@@ -1,0 +1,23 @@
+eval:
+  benchmark: mmmu
+
+inference:
+  backbone: janus_pro
+  backbone_cfg:
+    model_path: /model_cache/janus_pro/Janus-1.3B
+    janus_root: /workspace/src/umm/backbones/janus_pro/Janus
+    seed: 42
+    torch_dtype: bfloat16
+    understanding_cfg:
+      max_new_tokens: 2048
+      do_sample: false
+      use_cache: true
+
+mmmu:
+  root: MMMU/MMMU
+  cache_dir: /datasets/mmmu
+  datasets: [MMMU_validation]
+  out_dir: /outputs/mmmu/janus
+  score_output_path: /outputs/mmmu/janus/summary.json
+  run_calculation: true
+  max_images: 1

@@ -1,0 +1,24 @@
+inference:
+  backbone: janus_flow
+  backbone_cfg:
+    model_path: /model_cache/janus_flow/JanusFlow-1.3B
+    janus_root: /workspace/src/umm/backbones/janus_flow/Janus
+    vae_path: /model_cache/janus_flow/sdxl-vae
+    seed: 42
+    torch_dtype: bfloat16
+    generation_cfg:
+      cfg_weight: 2.0
+      num_inference_steps: 30
+      parallel_size: 5
+      img_size: 384
+
+dpg_bench:
+  prompts_dir: /workspace/eval/generation/dpg_bench/prompts
+  image_output_dir: /outputs/dpg_bench/janus_flow
+  resolution: 384
+  eval_python: python
+  score_output_path: /outputs/dpg_bench/janus_flow/final_score.json
+  eval_port: 29601
+  images_per_prompt: 5
+  overwrite: false
+  skip_eval: false

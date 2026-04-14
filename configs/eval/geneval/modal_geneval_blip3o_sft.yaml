@@ -1,0 +1,34 @@
+eval:
+  benchmark: geneval
+
+geneval:
+  geneval_root: /workspace/model/geneval
+  metadata_path: /workspace/model/geneval/prompts/evaluation_metadata.jsonl
+  out_dir: /output-apr4/geneval/blip3o_sft
+  images_per_prompt: 4
+  max_samples: 0
+  resume: true
+  score_output_path: /output-apr4/geneval/blip3o_sft/summary.json
+  mode: full  # full | generate | score
+  vlm_eval:
+    enabled: false
+    max_new_tokens: 512
+    max_retries: 2
+  detection_eval:
+    enabled: true
+    model_path: /model_cache/evaluator
+  run_scoring: true
+
+  score_model: wise
+  score_gpu: "A100-80GB"
+inference:
+  backbone: blip3o
+  backbone_cfg:
+    model_path: /post_train_model_cache/post_train/blip3o
+    blip3o_root: /workspace/model/BLIP3o
+    device: "cuda:0"
+    torch_dtype: bfloat16
+    scale: 0
+    seq_len: 729
+    top_p: 0.95
+    top_k: 1200

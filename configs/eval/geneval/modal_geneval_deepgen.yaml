@@ -1,0 +1,34 @@
+eval:
+  benchmark: geneval
+geneval:
+  score_model: wise
+  score_gpu: "A100-80GB"
+  geneval_root: /workspace/model/geneval
+  metadata_path: /workspace/model/geneval/prompts/evaluation_metadata.jsonl
+  out_dir: /outputs/geneval/deepgen
+  images_per_prompt: 4
+  max_samples: 0
+  resume: true
+  score_output_path: /outputs/geneval/deepgen/summary.json
+  mode: generate  # full | generate | score
+  vlm_eval:
+    enabled: false
+    max_new_tokens: 512
+    max_retries: 2
+  detection_eval:
+    enabled: true
+    model_path: /model_cache/evaluator
+  run_scoring: true
+
+inference:
+  backbone: deepgen
+  backbone_cfg:
+    model_path: /model_cache/deepgen/DeepGen-1.0-diffusers
+    device: "cuda:0"
+    torch_dtype: bfloat16
+    seed: 42
+    generation_cfg:
+      num_inference_steps: 50
+      guidance_scale: 4.0
+      height: 512
+      width: 512

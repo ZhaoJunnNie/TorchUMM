@@ -1,0 +1,28 @@
+eval:
+  benchmark: mathvista
+
+inference:
+  backbone: janus_pro
+  backbone_cfg:
+    model_path: /post_train_model_cache/post_train/Janus_pro/
+    janus_root: /workspace/src/umm/backbones/janus_pro/Janus
+    seed: 42
+    torch_dtype: bfloat16
+    understanding_cfg:
+      max_new_tokens: 2048
+      do_sample: false
+      use_cache: true
+
+mathvista:
+  score_model: wise
+  score_gpu: "A100-80GB"
+  resume: true
+  gt_file: /datasets/mathvista/annot_testmini.json
+  root: AI4Math/MathVista
+  cache_dir: /datasets/mathvista
+  datasets: [MathVista_testmini]
+  out_dir: /outputs/mathvista/janus_pro_sft
+  score_output_path: /outputs/mathvista/janus_pro_sft/summary.json
+  llm_extract:
+    model_path: /model_cache/evaluator/Qwen3-32B-AWQ
+    max_new_tokens: 2048

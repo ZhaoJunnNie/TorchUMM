@@ -1,0 +1,19 @@
+eval:
+  benchmark: mmmu
+
+inference:
+  backbone: ovis_u1
+  backbone_cfg:
+    model_path: /model_cache/ovis_u1/Ovis-U1-3B
+    understanding_cfg:
+      max_new_tokens: 5120
+      do_sample: false
+
+mmmu:
+  root: MMMU/MMMU
+  cache_dir: /workspace/data/MMMU
+  datasets: [MMMU_validation]
+  out_dir: /output-apr4/mmmu/ovis_u1-underN5120
+  score_output_path: /output-apr4/mmmu/ovis_u1-underN5120/summary.json
+  run_calculation: true
+  max_images: 1

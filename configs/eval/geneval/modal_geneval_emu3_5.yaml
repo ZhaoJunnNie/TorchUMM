@@ -1,0 +1,36 @@
+eval:
+  benchmark: geneval
+geneval:
+  geneval_root: /workspace/model/geneval
+  metadata_path: /workspace/model/geneval/prompts/evaluation_metadata.jsonl
+  out_dir: /outputs/geneval/emu3_5
+  images_per_prompt: 4
+  max_samples: 0
+  resume: true
+  score_output_path: /outputs/geneval/emu3_5/summary.json
+  mode: full  # full | generate | score
+  score_model: geneval  # detection scoring runs in geneval image (needs mmdetection)
+  score_gpu: "A100-80GB"
+  vlm_eval:
+    enabled: false
+    max_new_tokens: 512
+    max_retries: 2
+  detection_eval:
+    enabled: true
+    model_path: /model_cache/evaluator
+  run_scoring: true
+
+inference:
+  backbone: emu3_5
+  backbone_cfg:
+    model_path: /model_cache/emu3_5/Emu3.5-Image
+    vq_path: /model_cache/emu3_5/Emu3.5-VisionTokenizer
+    emu3_5_root: /workspace/model/Emu3.5
+    use_vllm: true
+    tensor_parallel_size: 2
+    gpu_memory_utilization: 0.7
+    classifier_free_guidance: 5.0
+    image_area: 1048576
+    generation_cfg:
+      max_new_tokens: 5120
+      classifier_free_guidance: 5.0

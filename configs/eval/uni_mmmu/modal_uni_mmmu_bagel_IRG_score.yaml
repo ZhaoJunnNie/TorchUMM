@@ -1,0 +1,21 @@
+eval:
+  benchmark: uni_mmmu
+
+inference:
+  backbone: bagel
+  backbone_cfg:
+    model_path: /post_train_model_cache/post_train/IRG/
+    bagel_root: /workspace/model/Bagel
+
+uni_mmmu:
+  data_root: /datasets/uni_mmmu/Uni-MMMU-Eval/data
+  tasks: all
+  mode: score
+  out_dir: /outputs/uni_mmmu/bagel_IRG
+  max_samples: 0
+  resume: true
+  score_output_path: /outputs/uni_mmmu/bagel_IRG/overall_summary.json
+  scoring:
+    qwen3_model: /model_cache/evaluator/Qwen3-32B
+    qwen2_5_vl_model: /model_cache/evaluator/Qwen2.5-VL-72B-Instruct
+    dreamsim_cache: /model_cache/dreamsim

@@ -1,0 +1,35 @@
+eval:
+  benchmark: geneval
+geneval:
+  geneval_root: /workspace/model/geneval
+  metadata_path: /workspace/model/geneval/prompts/evaluation_metadata.jsonl
+  out_dir: /outputs/geneval/show_o
+  images_per_prompt: 4
+  max_samples: 0
+  resume: true
+  score_output_path: /outputs/geneval/show_o/summary.json
+  mode: full  # full | generate | score
+  score_model: geneval  # detection scoring runs in geneval image (needs mmdetection)
+  score_gpu: "A100-80GB"
+  vlm_eval:
+    enabled: false
+    max_new_tokens: 512
+    max_retries: 2
+  detection_eval:
+    enabled: true
+    model_path: /model_cache/evaluator
+  run_scoring: true
+
+inference:
+  backbone: show_o
+  backbone_cfg:
+    model_path: /model_cache/show_o/show-o-w-clip-vit-512x512
+    show_o_root: /workspace/model/Show-o
+    vq_model_path: /model_cache/show_o/magvitv2
+    version: 1
+    seed: 42
+    torch_dtype: bfloat16
+    generation_cfg:
+      guidance_scale: 3.0
+      generation_timesteps: 50
+      batch_size: 1

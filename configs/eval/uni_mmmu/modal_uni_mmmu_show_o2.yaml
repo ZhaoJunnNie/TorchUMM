@@ -1,0 +1,27 @@
+eval:
+  benchmark: uni_mmmu
+
+inference:
+  backbone: show-o2
+  backbone_cfg:
+    model_path: /model_cache/show_o2/show-o2-7B
+    show_o_root: /workspace/model/Show-o
+    vae_path: /model_cache/show_o2/Wan2.1_VAE.pth
+    version: 2
+    seed: 42
+    torch_dtype: bfloat16
+    generation_cfg:
+      guidance_scale: 3.0
+      generation_timesteps: 50
+    understanding_cfg:
+      max_new_tokens: 2048
+      do_sample: false
+
+uni_mmmu:
+  data_root: /datasets/uni_mmmu/Uni-MMMU-Eval/data
+  tasks: [science, math_geo, code_rendering]  # no editing support; jigsaw/maze/sliding excluded
+  out_dir: /outputs/uni_mmmu/show_o2
+  max_samples: 0                        # 0 = all tasks
+  resume: true
+  score_output_path: /outputs/uni_mmmu/show_o2/overall_summary.json
+

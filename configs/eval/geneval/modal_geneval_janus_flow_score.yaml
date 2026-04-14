@@ -1,0 +1,26 @@
+eval:
+  benchmark: geneval
+
+geneval:
+  geneval_root: /workspace/model/geneval
+  metadata_path: /workspace/model/geneval/prompts/evaluation_metadata.jsonl
+  out_dir: /outputs/geneval/janus_flow
+  images_per_prompt: 5
+  max_samples: 0
+  resume: true
+  score_output_path: /outputs/geneval/janus_flow/summary.json
+  mode: score
+  vlm_eval:
+    enabled: false
+    max_new_tokens: 512
+    max_retries: 2
+  detection_eval:
+    enabled: true
+    model_path: /model_cache/evaluator
+  run_scoring: true
+
+  score_model: wise
+  score_gpu: "A100-80GB"
+inference:
+  backbone: janus_flow
+  backbone_cfg: {}

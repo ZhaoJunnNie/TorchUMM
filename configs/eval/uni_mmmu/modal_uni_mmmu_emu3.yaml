@@ -1,0 +1,21 @@
+eval:
+  benchmark: uni_mmmu
+
+inference:
+  backbone: emu3
+  backbone_cfg:
+    model_path: /model_cache/emu3/Emu3-Gen
+    vq_hub: /model_cache/emu3/Emu3-VisionTokenizer
+    emu_root: /workspace/model/Emu3
+    device: "cuda:0"
+    device_map: "cuda:0"
+    torch_dtype: bfloat16
+    attn_implementation: flash_attention_2
+
+uni_mmmu:
+  data_root: /datasets/uni_mmmu/Uni-MMMU-Eval/data
+  tasks: [science, math_geo, code_rendering]  # no editing support; jigsaw/maze/sliding excluded
+  out_dir: /outputs/uni_mmmu/emu3
+  max_samples: 0
+  resume: true
+  score_output_path: /outputs/uni_mmmu/emu3/overall_summary.json

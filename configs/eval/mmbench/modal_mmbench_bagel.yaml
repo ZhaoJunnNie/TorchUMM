@@ -1,0 +1,20 @@
+eval:
+  benchmark: mmbench
+
+inference:
+  backbone: bagel
+  backbone_cfg:
+    model_path: /model_cache/bagel/BAGEL-7B-MoT
+    bagel_root: /workspace/model/Bagel
+    max_mem_per_gpu: 80GiB
+    offload_folder: ./tmp/offload
+    seed: 42
+
+    understanding_cfg:
+      max_think_token_n: 1000
+      do_sample: false
+
+mmbench:
+  datasets: [mmbench_dev_20230712]
+  out_dir: /outputs/mmbench/bagel
+  score_output_path: /outputs/mmbench/bagel/summary.json

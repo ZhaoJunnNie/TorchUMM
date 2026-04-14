@@ -1,0 +1,30 @@
+eval:
+  benchmark: mathvista
+
+inference:
+  backbone: show_o
+  backbone_cfg:
+    version: 1
+    model_path: /model_cache/show_o/show-o-w-clip-vit-512x512
+    show_o_root: /workspace/model/Show-o
+    vq_model_path: /model_cache/show_o/magvitv2
+    seed: 42
+    torch_dtype: bfloat16
+    understanding_cfg:
+      max_new_tokens: 256
+      do_sample: false
+      use_clip_vit: true
+
+mathvista:
+  score_model: wise
+  score_gpu: "A100-80GB"
+  resume: true
+  gt_file: /datasets/mathvista/annot_testmini.json
+  root: AI4Math/MathVista
+  cache_dir: /datasets/mathvista/show_o
+  datasets: [MathVista_testmini]
+  out_dir: /output-apr4/mathvista/show_o-underN256
+  score_output_path: /output-apr4/mathvista/show_o-underN256/summary.json
+  llm_extract:
+    model_path: /model_cache/evaluator/Qwen3-32B-AWQ
+    max_new_tokens: 2048

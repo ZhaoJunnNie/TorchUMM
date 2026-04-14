@@ -1,0 +1,23 @@
+eval:
+  benchmark: mmbench
+
+inference:
+  backbone: janus_flow
+  backbone_cfg:
+    model_path: /model_cache/janus_flow/JanusFlow-1.3B
+    janus_root: /workspace/src/umm/backbones/janus_flow/Janus
+    vae_path: /model_cache/janus_flow/sdxl-vae
+    seed: 42
+    torch_dtype: bfloat16
+    understanding_cfg:
+      max_new_tokens: 2048
+      do_sample: false
+      use_cache: true
+
+mmbench:
+  datasets: [mmbench_dev_20230712]
+  dataset_paths:
+    mmbench_dev_20230712: /datasets/mmbench/mmbench_dev_20230712.tsv
+  out_dir: /outputs/mmbench/janus_flow
+  score_output_path: /outputs/mmbench/janus_flow/summary.json
+  resume: true

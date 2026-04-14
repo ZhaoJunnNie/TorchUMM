@@ -1,0 +1,25 @@
+eval:
+  benchmark: mmmu
+
+inference:
+  backbone: bagel
+  backbone_cfg:
+    model_path: /post_train_model_cache/post_train/recA/
+    checkpoint_file: model.safetensors
+    bagel_root: /workspace/model/Bagel
+    max_mem_per_gpu: 80GiB
+    offload_folder: ./tmp/offload
+    seed: 42
+
+    understanding_cfg:
+      max_think_token_n: 1000
+      do_sample: false
+
+mmmu:
+  root: MMMU/MMMU
+  cache_dir: /workspace/data/MMMU
+  datasets: [MMMU_validation]
+  out_dir: /outputs/mmmu/bagel_recA
+  score_output_path: /outputs/mmmu/bagel_recA/summary.json
+  run_calculation: true
+  max_images: 1
