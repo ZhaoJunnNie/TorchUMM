@@ -1,0 +1,14 @@
+# Data and outputs
+data/
+output/
+model/
+model_cache/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
+*.so
