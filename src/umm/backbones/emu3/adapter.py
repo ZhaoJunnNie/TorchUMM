@@ -25,6 +25,7 @@ class Emu3Backbone:
         vq_hub: Optional[str] = None,
         device: Optional[str] = None,
         device_map: Optional[str] = None,
+        vq_device: Optional[str] = None,
         torch_dtype: str = "bfloat16",
         attn_implementation: str = "flash_attention_2",
     ) -> None:
@@ -35,6 +36,7 @@ class Emu3Backbone:
         self.vq_hub = vq_hub or str(repo_root / "model_cache" / "emu3" / "models" / "emu3_vision_tokenizer")
         self.device = device or "cuda:0"
         self.device_map = device_map or "cuda:0"
+        self.vq_device = vq_device or self.device
         self.torch_dtype = torch_dtype
         self.attn_implementation = attn_implementation
         self.seed = 42
@@ -66,6 +68,8 @@ class Emu3Backbone:
             self.device = cfg["device"]
         if isinstance(cfg.get("device_map"), str):
             self.device_map = cfg["device_map"]
+        if isinstance(cfg.get("vq_device"), str) and cfg["vq_device"]:
+            self.vq_device = cfg["vq_device"]
         if isinstance(cfg.get("torch_dtype"), str):
             self.torch_dtype = cfg["torch_dtype"]
         if isinstance(cfg.get("attn_implementation"), str):
@@ -124,7 +128,7 @@ class Emu3Backbone:
 
         image_processor = AutoImageProcessor.from_pretrained(self.vq_hub, trust_remote_code=True)
         image_tokenizer = AutoModel.from_pretrained(
-            self.vq_hub, device_map=self.device_map, trust_remote_code=True,
+            self.vq_hub, device_map=self.vq_device, trust_remote_code=True,
         ).eval()
 
         self.processor = Emu3Processor(image_processor, image_tokenizer, self.tokenizer)
@@ -146,16 +150,38 @@ class Emu3Backbone:
             raise ValueError("Generation requires a prompt.")
         prompts = prompt if isinstance(prompt, (list, tuple)) else [prompt]
         output_path = batch.get("output_path")
+        num_images = int(gen_cfg.get("num_images", 1))
 
         saved_paths = []
         with torch.inference_mode():
-            for i, p in enumerate(prompts):
-                img = self._generate_one(p, gen_cfg)
-                if img is not None and output_path and i == 0:
-                    dst = Path(output_path)
-                    dst.parent.mkdir(parents=True, exist_ok=True)
-                    img.save(str(dst), format=self._fmt(dst))
-                    saved_paths.append(str(dst))
+            if num_images > 1 and len(prompts) == 1:
+                # Batched multi-image generation for a single prompt
+                p = prompts[0]
+                base_dir = Path(output_path).parent if output_path else Path(".")
+                stem = Path(output_path).stem if output_path else "sample"
+                base_dir.mkdir(parents=True, exist_ok=True)
+                try:
+                    images = self._generate_batch_images(p, num_images, gen_cfg)
+                    for idx, img in enumerate(images):
+                        dst = base_dir / f"{stem}_{idx}.png"
+                        img.save(str(dst), format="PNG")
+                        saved_paths.append(str(dst))
+                except torch.cuda.OutOfMemoryError:
+                    print("[emu3] OOM in batched generation, falling back to serial", flush=True)
+                    for idx in range(num_images):
+                        img = self._generate_one(p, gen_cfg)
+                        if img is not None:
+                            dst = base_dir / f"{stem}_{idx}.png"
+                            img.save(str(dst), format="PNG")
+                            saved_paths.append(str(dst))
+            else:
+                for i, p in enumerate(prompts):
+                    img = self._generate_one(p, gen_cfg)
+                    if img is not None and output_path and i == 0:
+                        dst = Path(output_path)
+                        dst.parent.mkdir(parents=True, exist_ok=True)
+                        img.save(str(dst), format=self._fmt(dst))
+                        saved_paths.append(str(dst))
 
         return {
             "images": saved_paths,
@@ -279,6 +305,82 @@ class Emu3Backbone:
             if isinstance(item, Image.Image):
                 return item
         return None
+
+    def _generate_batch_images(
+        self, prompt: str, num_images: int, gen_cfg: dict[str, Any]
+    ) -> list[Image.Image]:
+        """Generate *num_images* images from a single prompt in one model.generate() call."""
+        from transformers.generation.configuration_utils import GenerationConfig
+        from transformers.generation import (
+            LogitsProcessorList,
+            PrefixConstrainedLogitsProcessor,
+            UnbatchedClassifierFreeGuidanceLogitsProcessor,
+        )
+
+        cfg = dict(self.default_generation_cfg)
+        if gen_cfg:
+            cfg.update(gen_cfg)
+
+        positive_prompt = cfg.get("positive_prompt", " masterpiece, film grained, best quality.")
+        negative_prompt = cfg.get(
+            "negative_prompt",
+            "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, "
+            "fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, "
+            "signature, watermark, username, blurry.",
+        )
+        cfg_scale = float(cfg.get("classifier_free_guidance", 3.0))
+
+        generation_config = GenerationConfig(
+            use_cache=True,
+            eos_token_id=self.model.config.eos_token_id,
+            pad_token_id=self.model.config.pad_token_id,
+            max_new_tokens=int(cfg.get("max_new_tokens", 40960)),
+            do_sample=bool(cfg.get("do_sample", True)),
+            top_k=int(cfg.get("top_k", 2048)),
+        )
+
+        full_prompt = prompt + positive_prompt
+        kwargs = dict(
+            mode="G",
+            ratio=cfg.get("ratio", "1:1"),
+            image_area=int(cfg.get("image_area", self.model.config.image_area)),
+            return_tensors="pt",
+            padding="longest",
+        )
+
+        # Batched inputs: [num_images, seq_len] for both pos and neg so that
+        # UnbatchedCFGLogitsProcessor KV-cache attention_mask shapes match.
+        pos_inputs = self.processor(text=[full_prompt] * num_images, **kwargs)
+        neg_inputs = self.processor(text=[negative_prompt] * num_images, **kwargs)
+
+        h = pos_inputs.image_size[:, 0]
+        w = pos_inputs.image_size[:, 1]
+        constrained_fn = self.processor.build_prefix_constrained_fn(h, w)
+
+        logits_processor = LogitsProcessorList([
+            UnbatchedClassifierFreeGuidanceLogitsProcessor(
+                cfg_scale,
+                self.model,
+                unconditional_ids=neg_inputs.input_ids.to(self.device),
+            ),
+            PrefixConstrainedLogitsProcessor(constrained_fn, num_beams=1),
+        ])
+
+        outputs = self.model.generate(
+            pos_inputs.input_ids.to(self.device),
+            generation_config,
+            logits_processor=logits_processor,
+            attention_mask=pos_inputs.attention_mask.to(self.device),
+        )
+
+        images: list[Image.Image] = []
+        for i in range(num_images):
+            mm_list = self.processor.decode(outputs[i])
+            for item in mm_list:
+                if isinstance(item, Image.Image):
+                    images.append(item)
+                    break
+        return images
 
     # ------------------------------------------------------------------
     # Understanding

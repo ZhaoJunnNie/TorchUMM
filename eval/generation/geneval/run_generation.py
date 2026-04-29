@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 import traceback
@@ -83,61 +84,72 @@ def _load_prompts(metadata_path: Path, max_samples: int) -> List[Dict[str, Any]]
 # Image extraction helpers
 # ---------------------------------------------------------------------------
 
-def _extract_saved_path(result: Any, fallback_dir: Path) -> str:
-    """Return the path of the generated image from a pipeline result."""
+def _extract_saved_paths(result: Any, fallback_dir: Path) -> List[str]:
+    """Return generated image paths from a pipeline result."""
     from PIL import Image
+
+    saved_paths: List[str] = []
 
     if isinstance(result, dict):
         for key in ("saved_paths", "output_path", "image_path", "image_paths"):
             val = result.get(key)
-            if isinstance(val, list) and val and isinstance(val[0], str) and val[0]:
-                p = Path(val[0])
-                if p.is_file():
-                    return str(p)
+            if isinstance(val, list):
+                for item in val:
+                    if isinstance(item, str) and item:
+                        p = Path(item)
+                        if p.is_file():
+                            saved_paths.append(str(p))
+                if saved_paths:
+                    return saved_paths
             if isinstance(val, str) and val:
                 p = Path(val)
                 if p.is_file():
-                    return str(p)
+                    return [str(p)]
         img = result.get("image")
         if isinstance(img, Image.Image):
             out_path = fallback_dir / "generated.png"
             out_path.parent.mkdir(parents=True, exist_ok=True)
             img.save(str(out_path), format="PNG")
-            return str(out_path)
+            return [str(out_path)]
         imgs = result.get("images")
         if isinstance(imgs, list) and imgs:
-            if isinstance(imgs[0], str) and imgs[0]:
-                p = Path(imgs[0])
-                if p.is_file():
-                    return str(p)
-            elif isinstance(imgs[0], Image.Image):
-                out_path = fallback_dir / "generated.png"
-                out_path.parent.mkdir(parents=True, exist_ok=True)
-                imgs[0].save(str(out_path), format="PNG")
-                return str(out_path)
+            for idx, item in enumerate(imgs):
+                if isinstance(item, str) and item:
+                    p = Path(item)
+                    if p.is_file():
+                        saved_paths.append(str(p))
+                elif isinstance(item, Image.Image):
+                    out_path = fallback_dir / f"generated_{idx:05d}.png"
+                    out_path.parent.mkdir(parents=True, exist_ok=True)
+                    item.save(str(out_path), format="PNG")
+                    saved_paths.append(str(out_path))
+            if saved_paths:
+                return saved_paths
     if isinstance(result, Image.Image):
         out_path = fallback_dir / "generated.png"
         out_path.parent.mkdir(parents=True, exist_ok=True)
         result.save(str(out_path), format="PNG")
-        return str(out_path)
+        return [str(out_path)]
 
     # Scan fallback_dir for recently created images
     if fallback_dir.is_dir():
         img_exts = {".png", ".jpg", ".jpeg", ".webp"}
-        candidates = sorted(
+        candidates = [
+            str(f) for f in sorted(
             [f for f in fallback_dir.rglob("*") if f.is_file() and f.suffix.lower() in img_exts],
             key=lambda p: p.stat().st_mtime,
             reverse=True,
         )
+        ]
         if candidates:
-            return str(candidates[0])
-    return ""
+            return candidates
+    return []
 
 
 def _clear_workspace(workspace: Path) -> None:
     """Remove all image files from *workspace* so the fallback scan is unambiguous."""
     img_exts = {".png", ".jpg", ".jpeg", ".webp"}
-    for f in workspace.iterdir():
+    for f in workspace.rglob("*"):
         if f.is_file() and f.suffix.lower() in img_exts:
             f.unlink(missing_ok=True)
 
@@ -150,6 +162,13 @@ def _clear_workspace(workspace: Path) -> None:
 _SEED_IN_PARAMS_BACKBONES = {"omnigen2"}
 
 
+def _distributed_context() -> Tuple[int, int, int]:
+    rank = int(os.environ.get("RANK", "0"))
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    return rank, world_size, local_rank
+
+
 def _run_generation(
     pipeline: Any,
     backbone: str,
@@ -158,10 +177,12 @@ def _run_generation(
     request_params: Dict[str, Any],
     images_per_prompt: int,
     resume: bool,
+    rank: int = 0,
+    world_size: int = 1,
 ) -> Dict[str, Any]:
     """Generate images for each GenEval prompt in the expected directory structure."""
     images_dir.mkdir(parents=True, exist_ok=True)
-    workspace = images_dir / "_gen_workspace"
+    workspace = images_dir / f"_gen_workspace_rank{rank:02d}"
     workspace.mkdir(parents=True, exist_ok=True)
 
     total = len(prompts)
@@ -169,7 +190,13 @@ def _run_generation(
 
     base_seed = int(request_params.get("seed", 42))
 
-    for idx, metadata in tqdm(enumerate(prompts), total=total, desc="[geneval gen]"):
+    assigned = [(idx, metadata) for idx, metadata in enumerate(prompts) if idx % world_size == rank]
+
+    for idx, metadata in tqdm(
+        assigned,
+        total=len(assigned),
+        desc=f"[geneval gen rank {rank}]",
+    ):
         prompt_dir = images_dir / f"{idx:05d}"
         samples_dir = prompt_dir / "samples"
         samples_dir.mkdir(parents=True, exist_ok=True)
@@ -188,18 +215,16 @@ def _run_generation(
 
         prompt_text = metadata.get("prompt", "")
         prompt_ok = True
+        sample_count = len(existing_samples) if resume else 0
 
-        for sample_idx in range(images_per_prompt):
-            out_file = samples_dir / f"{sample_idx:05d}.png"
-            if resume and out_file.is_file():
-                continue
-
+        while sample_count < images_per_prompt:
             _clear_workspace(workspace)
-            expected_path = workspace / f"{sample_idx:05d}.png"
+            remaining = images_per_prompt - sample_count
+            expected_path = workspace / "sample.png"
 
             if backbone in _SEED_IN_PARAMS_BACKBONES:
                 sample_params = dict(request_params)
-                sample_params["seed"] = base_seed + idx * images_per_prompt + sample_idx
+                sample_params["seed"] = base_seed + idx * images_per_prompt + sample_count
             else:
                 sample_params = request_params
 
@@ -213,28 +238,36 @@ def _run_generation(
             try:
                 result = pipeline.run(payload)
             except Exception as exc:
-                print(f"[geneval] prompt={idx} sample={sample_idx} generation error: {exc}")
+                print(f"[geneval] prompt={idx} sample={sample_count} generation error: {exc}")
                 traceback.print_exc()
                 prompt_ok = False
-                continue
+                break
 
-            if expected_path.is_file():
-                saved = str(expected_path)
-            else:
-                saved = _extract_saved_path(result, workspace)
+            produced = [str(expected_path)] if expected_path.is_file() else _extract_saved_paths(result, workspace)
+            produced = [p for p in produced if p and Path(p).is_file()]
 
-            if saved and Path(saved).is_file():
-                shutil.copy2(saved, str(out_file))
-            else:
-                print(f"[geneval] prompt={idx} sample={sample_idx}: no image produced")
+            if not produced:
+                print(f"[geneval] prompt={idx} sample={sample_count}: no image produced")
                 prompt_ok = False
+                break
+
+            for saved in produced[:remaining]:
+                out_file = samples_dir / f"{sample_count:05d}.png"
+                shutil.copy2(saved, str(out_file))
+                sample_count += 1
 
         if prompt_ok:
             n_ok += 1
         else:
             n_err += 1
 
-    return {"total": total, "ok": n_ok, "skipped": n_skip, "error": n_err}
+    return {
+        "total": total,
+        "assigned": len(assigned),
+        "ok": n_ok,
+        "skipped": n_skip,
+        "error": n_err,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +304,15 @@ def main() -> int:
     _eval_cfg, geneval_cfg, inference_cfg = _load_eval_cfg(args.config)
     # eval/generation/geneval/run_generation.py -> parents[3] = repo root
     repo_root = Path(__file__).resolve().parents[3]
+    rank, world_size, local_rank = _distributed_context()
+
+    try:
+        import torch
+    except ImportError:
+        torch = None
+
+    if torch is not None and world_size > 1 and torch.cuda.is_available():
+        torch.cuda.set_device(local_rank)
 
     # --- Resolve inference config (support infer_config reference) ---
     infer_config_ref = inference_cfg.get("infer_config")
@@ -322,7 +364,8 @@ def main() -> int:
     print(
         f"[geneval] backbone={backbone}, out_dir={out_dir}, "
         f"images_per_prompt={images_per_prompt}, "
-        f"max_samples={max_samples or 'all'}, resume={resume}"
+        f"max_samples={max_samples or 'all'}, resume={resume}, "
+        f"rank={rank}, world_size={world_size}"
     )
 
     # --- Load prompts ---
@@ -342,6 +385,8 @@ def main() -> int:
         request_params=request_params,
         images_per_prompt=images_per_prompt,
         resume=resume,
+        rank=rank,
+        world_size=world_size,
     )
 
     print(
@@ -350,8 +395,9 @@ def main() -> int:
     )
 
     # Save generation summary
-    summary_path = out_dir / "gen_summary.json"
-    summary_path.write_text(json.dumps(gen_summary, indent=2), encoding="utf-8")
+    if rank == 0:
+        summary_path = out_dir / "gen_summary.json"
+        summary_path.write_text(json.dumps(gen_summary, indent=2), encoding="utf-8")
 
     return 0
 

@@ -41,6 +41,7 @@ def _run_object_detection_eval(
     images_dir: Path,
     results_file: Path,
     eval_cfg: Dict[str, Any],
+    repo_root: Optional[Path] = None,
 ) -> bool:
     """Run GenEval evaluate_images.py using Mask2Former."""
     eval_script = eval_dir / "evaluate_images.py"
@@ -48,7 +49,11 @@ def _run_object_detection_eval(
         print(f"[geneval-score] evaluate_images.py not found at {eval_script}")
         return False
 
-    model_path = str(eval_cfg.get("model_path", "./"))
+    model_path_raw = eval_cfg.get("model_path", "./")
+    if repo_root is not None:
+        model_path = str(_resolve_path(str(model_path_raw), repo_root))
+    else:
+        model_path = str(model_path_raw)
     model_config = eval_cfg.get("model_config")
     eval_python = str(eval_cfg.get("eval_python", sys.executable))
 
@@ -176,12 +181,8 @@ def _get_backbone_name(inference_cfg: Dict[str, Any], repo_root: Path) -> str:
 # Main
 # ---------------------------------------------------------------------------
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="GenEval scoring (evaluate + summarize)")
-    parser.add_argument("--config", required=True, help="Path to eval config YAML")
-    args = parser.parse_args()
-
-    geneval_cfg, inference_cfg = _load_eval_cfg(args.config)
+def run_scoring_for_config(config_path: str) -> int:
+    geneval_cfg, inference_cfg = _load_eval_cfg(config_path)
     # eval/generation/geneval/run_scoring.py -> parents[3] = repo root
     repo_root = Path(__file__).resolve().parents[3]
     # The evaluation scripts (evaluate_images.py, summary_scores.py) live
@@ -216,6 +217,7 @@ def main() -> int:
         images_dir=images_dir,
         results_file=results_file,
         eval_cfg=detection_eval_cfg,
+        repo_root=repo_root,
     )
 
     if not detection_ok:
@@ -252,6 +254,13 @@ def main() -> int:
 
     print("[geneval-score] scoring completed.")
     return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="GenEval scoring (evaluate + summarize)")
+    parser.add_argument("--config", required=True, help="Path to eval config YAML")
+    args = parser.parse_args()
+    return run_scoring_for_config(args.config)
 
 
 if __name__ == "__main__":
