@@ -109,7 +109,7 @@ class calculate_metrics:
 
                     for img_item in img_items:
                         try:
-                            img_name, question, gt_ans, pred_ans = img_item.split('\t')
+                            img_name, question, gt_ans, pred_ans = img_item.split('\t', 3)
                         except:
                             print(img_item)
                             continue

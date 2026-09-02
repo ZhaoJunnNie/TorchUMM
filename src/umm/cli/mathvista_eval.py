@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 import time
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +44,104 @@ COT_INSTRUCTION = (
 from umm.eval.internvl_chat.eval.mathvista.prompts.ext_ans import demo_prompt as _EXTRACT_DEMO_PROMPT
 
 
+# A capable local extraction model can answer MathVista questions itself when
+# the target question is included in the extraction prompt.  That turns
+# nonsensical model responses into apparently correct predictions.  Keep the
+# extractor response-grounded and make invalid extractions explicit so the
+# downstream scorer cannot map them to the edit-distance-nearest choice.
+EXTRACTION_PROTOCOL = "response_grounded_v1"
+INVALID_EXTRACTION = "__INVALID_RESPONSE_EXTRACTION__"
+
+
+def _normalized_surface(value: Any) -> str:
+    text = unicodedata.normalize("NFKC", str(value or "")).casefold()
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _surface_contains(response: str, answer: str) -> bool:
+    """Return whether an answer occurs as a bounded surface in a response."""
+
+    haystack = _normalized_surface(response)
+    needle = _normalized_surface(answer)
+    if not haystack or not needle:
+        return False
+    # Treat thousands separators as formatting, not semantic content.
+    if re.fullmatch(r"[-+]?\d[\d,]*(?:\.\d+)?", needle):
+        return bool(re.search(
+            rf"(?<![\w.]){re.escape(needle.replace(',', ''))}(?![\w.])",
+            haystack.replace(",", ""),
+        ))
+    return bool(re.search(rf"(?<!\w){re.escape(needle)}(?!\w)", haystack))
+
+
+def _ground_extraction(
+    response: str,
+    extraction: Any,
+    problem: dict[str, Any],
+) -> str | None:
+    """Canonicalize an extraction only when the response supports it.
+
+    The extraction model is an information extractor, not a second benchmark
+    solver.  Multiple-choice answers must be an explicit option label or an
+    option surface present in the response.  Free-form answers must occur in
+    the response; list answers may be reformatted but every scalar element
+    must be present.
+    """
+
+    raw = str(extraction or "").strip()
+    response_text = str(response or "")
+    if not raw or raw == INVALID_EXTRACTION or not response_text.strip():
+        return None
+
+    if str(problem.get("question_type", "")) == "multi_choice":
+        choices = [str(choice) for choice in (problem.get("choices") or [])]
+        options = [chr(ord("A") + index) for index in range(len(choices))]
+
+        letter_match = re.fullmatch(r"\s*\(?([A-Za-z])\)?[.)]?\s*", raw)
+        if letter_match:
+            letter = letter_match.group(1).upper()
+            if letter not in options:
+                return None
+            explicit = re.search(
+                rf"(?:final\s+answer|correct\s+answer|answer|option|choice)"
+                rf"\s*(?:is\s*)?[:=-]?\s*\(?{letter}\)?(?:\W|$)",
+                response_text,
+                flags=re.IGNORECASE,
+            )
+            parenthesized = re.search(
+                rf"(?<!\w)\({letter}\)(?!\w)", response_text, flags=re.IGNORECASE
+            )
+            terminal = re.search(
+                rf"(?:^|\n)\s*\(?{letter}\)?[.)]?\s*$",
+                response_text,
+                flags=re.IGNORECASE,
+            )
+            choice_surface = _surface_contains(
+                response_text, choices[options.index(letter)]
+            )
+            return letter if explicit or parenthesized or terminal or choice_surface else None
+
+        # Accept an extracted option surface only if that same surface is
+        # actually present in the model response.  Return the canonical choice
+        # text and avoid edit-distance guessing on arbitrary strings.
+        normalized_raw = _normalized_surface(raw)
+        for choice in choices:
+            if normalized_raw == _normalized_surface(choice) and _surface_contains(
+                response_text, choice
+            ):
+                return choice
+        return None
+
+    if _surface_contains(response_text, raw):
+        return raw
+
+    if str(problem.get("answer_type", "")) == "list":
+        elements = re.findall(r"[-+]?\d+(?:\.\d+)?|[A-Za-z]+", raw)
+        if elements and all(_surface_contains(response_text, item) for item in elements):
+            return raw
+    return None
+
+
 def _quick_extract(response: str, problem: dict) -> str | None:
     """Try rule-based extraction before falling back to LLM."""
     if not response:
@@ -74,10 +173,27 @@ def _quick_extract(response: str, problem: dict) -> str | None:
     return None  # need LLM extraction
 
 
-def _build_extract_prompt(query: str, response: str) -> str:
-    """Build the full prompt for LLM-based answer extraction."""
-    test_prompt = f"{query}\n\n{response}"
-    return f"{_EXTRACT_DEMO_PROMPT.strip()}\n\n{test_prompt}\n\nExtracted answer: "
+def _build_extract_prompt(problem: dict[str, Any], response: str) -> str:
+    """Build a response-only prompt so the judge cannot solve the task."""
+
+    question_type = str(problem.get("question_type", "unknown"))
+    answer_type = str(problem.get("answer_type", "unknown"))
+    choices = problem.get("choices") or []
+    choice_text = ""
+    if question_type == "multi_choice" and choices:
+        choice_text = "\nValid choices:\n" + "\n".join(
+            f"({chr(ord('A') + index)}) {choice}"
+            for index, choice in enumerate(choices)
+        )
+    target = (
+        "Extract only an answer explicitly stated in the target model response. "
+        "Do not solve or guess the original problem. If the response does not "
+        f"state an answer, output {INVALID_EXTRACTION}.\n"
+        f"Question type: {question_type}\nAnswer type: {answer_type}"
+        f"{choice_text}\n\nTarget model response:\n{response}\n\n"
+        "Extracted answer: "
+    )
+    return f"{_EXTRACT_DEMO_PROMPT.strip()}\n\n{target}"
 
 
 def _run_llm_extraction(
@@ -93,15 +209,36 @@ def _run_llm_extraction(
     for pid, problem in results.items():
         if "choices" not in problem:
             continue
-        # Skip if extraction was already done in a previous run
+        # Revalidate prior extractions as well.  Older local-judge results may
+        # have answered the target question instead of extracting the response.
         if "extraction" in problem and problem["extraction"]:
+            if problem["extraction"] == INVALID_EXTRACTION:
+                already_done += 1
+                continue
+            grounded = _ground_extraction(
+                problem.get("response", ""), problem["extraction"], problem
+            )
+            if grounded is None:
+                problem.setdefault("raw_extraction", problem["extraction"])
+                problem["extraction"] = INVALID_EXTRACTION
+                problem["extraction_grounded"] = False
+            else:
+                problem["extraction"] = grounded
+                problem["extraction_grounded"] = True
             already_done += 1
             continue
         response = problem.get("response", "")
         if use_quick_extract:
             quick = _quick_extract(response, problem)
             if quick is not None:
-                problem["extraction"] = quick
+                grounded = _ground_extraction(response, quick, problem)
+                if grounded is None:
+                    problem["raw_extraction"] = quick
+                    problem["extraction"] = INVALID_EXTRACTION
+                    problem["extraction_grounded"] = False
+                else:
+                    problem["extraction"] = grounded
+                    problem["extraction_grounded"] = True
                 continue
         need_llm.append(pid)
 
@@ -137,9 +274,8 @@ def _run_llm_extraction(
 
     for pid in tqdm(need_llm, desc="mathvista/extract", file=sys.stdout):
         problem = results[pid]
-        query = problem.get("query", "")
         response = problem.get("response", "")
-        prompt = _build_extract_prompt(query, response)
+        prompt = _build_extract_prompt(problem, response)
 
         messages = [{"role": "user", "content": prompt}]
         text = tokenizer.apply_chat_template(
@@ -162,7 +298,14 @@ def _run_llm_extraction(
             extraction = think_match.group(1).strip()
         # Take only the first line as the extracted answer
         extraction = extraction.split("\n")[0].strip()
-        problem["extraction"] = extraction
+        grounded = _ground_extraction(response, extraction, problem)
+        if grounded is None:
+            problem["raw_extraction"] = extraction
+            problem["extraction"] = INVALID_EXTRACTION
+            problem["extraction_grounded"] = False
+        else:
+            problem["extraction"] = grounded
+            problem["extraction_grounded"] = True
 
     del model
     del tokenizer
@@ -313,6 +456,7 @@ def run_mathvista_eval_command(args: Any) -> int:
 
     summary: dict[str, Any] = {
         "benchmark": "mathvista",
+        "extraction_protocol": EXTRACTION_PROTOCOL,
         "backbone": backbone,
         "out_dir": str(out_dir),
         "datasets": datasets,
@@ -501,6 +645,9 @@ def run_mathvista_eval_command(args: Any) -> int:
                 if proc.stderr:
                     print(proc.stderr, file=sys.stderr)
                 raise RuntimeError(f"MathVista calculate_score failed with return code {proc.returncode}")
+            score_payload = json.loads(score_file.read_text("utf-8"))
+            score_payload["extraction_protocol"] = EXTRACTION_PROTOCOL
+            score_file.write_text(json.dumps(score_payload, indent=2), encoding="utf-8")
             summary[f"{ds_name}_score_file"] = str(score_file)
             summary[f"{ds_name}_score_stdout"] = proc.stdout
 

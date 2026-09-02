@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import random
 import subprocess
 import sys
@@ -180,7 +181,11 @@ def run_mmmu_eval_command(args: Any) -> int:
     if isinstance(user_prompts, dict):
         prompt_cfg.update({str(k): str(v) for k, v in user_prompts.items()})
 
-    dataset_root = str(mmmu_cfg.get("root", "MMMU/MMMU"))
+    # A pinned local snapshot takes precedence when supplied by the campaign
+    # runner.  This avoids a Hub metadata lookup after expensive PTQ setup.
+    dataset_root = os.environ.get(
+        "UMM_MMMU_ROOT", str(mmmu_cfg.get("root", "MMMU/MMMU"))
+    )
     cache_dir = mmmu_cfg.get("cache_dir")
     cache_dir_path = _resolve_path(str(cache_dir), repo_root) if cache_dir else repo_root / "data" / "MMMU"
 
@@ -274,7 +279,14 @@ def run_mmmu_eval_command(args: Any) -> int:
                     "prompt": prompt,
                     "images": image_paths,
                     "params": request_params,
-                    "metadata": {"question_type": question_type, "data_id": data_id},
+                    # This contains no ground truth.  It prevents likelihood
+                    # adapters from truncating multiline answer candidates
+                    # while reparsing the display prompt.
+                    "metadata": {
+                        "question_type": question_type,
+                        "data_id": data_id,
+                        "choices": index2ans,
+                    },
                 }
                 output = pipeline.run(payload)
                 response = _extract_text(output)

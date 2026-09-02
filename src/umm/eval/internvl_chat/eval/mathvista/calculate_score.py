@@ -9,6 +9,9 @@ from Levenshtein import distance
 from utilities import read_json, save_json
 
 
+INVALID_EXTRACTION = "__INVALID_RESPONSE_EXTRACTION__"
+
+
 def get_most_similar(prediction, choices):
     """
     Use the Levenshtein distance (or edit distance) to determine which of the choices is most similar to the given prediction
@@ -24,6 +27,8 @@ def normalize_extracted_answer(extraction, choices, question_type, answer_type, 
     Normalize the extracted answer to match the answer type
     """
     if question_type == 'multi_choice':
+        if extraction is None or str(extraction).strip() in ('', INVALID_EXTRACTION):
+            return None
         # make sure the extraction is a string
         if isinstance(extraction, str):
             extraction = extraction.strip()

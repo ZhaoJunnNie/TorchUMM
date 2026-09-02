@@ -182,7 +182,8 @@ def _run_generation(
 ) -> Dict[str, Any]:
     """Generate images for each GenEval prompt in the expected directory structure."""
     images_dir.mkdir(parents=True, exist_ok=True)
-    workspace = images_dir / f"_gen_workspace_rank{rank:02d}"
+    workspace_tag = os.environ.get("GENEVAL_WORKSPACE_TAG", f"rank{rank:02d}")
+    workspace = images_dir / f"_gen_workspace_{workspace_tag}"
     workspace.mkdir(parents=True, exist_ok=True)
 
     total = len(prompts)
@@ -190,13 +191,45 @@ def _run_generation(
 
     base_seed = int(request_params.get("seed", 42))
 
-    assigned = [(idx, metadata) for idx, metadata in enumerate(prompts) if idx % world_size == rank]
+    # Optional range restriction is useful for resumable single-process workers
+    # that fill disjoint parts of an existing full GenEval run.  The original
+    # prompt index is retained, so output paths and per-prompt seeds remain
+    # identical to an unsharded run.
+    range_start = int(os.environ.get("GENEVAL_INDEX_START", "0"))
+    range_end = int(os.environ.get("GENEVAL_INDEX_END", str(total)))
+    if not (0 <= range_start <= range_end <= total):
+        raise ValueError(
+            "invalid GenEval index range: "
+            f"[{range_start}, {range_end}) for {total} prompts"
+        )
+    assigned = [
+        (idx, metadata)
+        for idx, metadata in enumerate(prompts)
+        if range_start <= idx < range_end and idx % world_size == rank
+    ]
+    if os.environ.get("GENEVAL_REVERSE", "0") == "1":
+        assigned.reverse()
+
+    guard_prefix = int(os.environ.get("GENEVAL_GUARD_PREFIX", "0"))
+
+    def _completed_prefix() -> int:
+        """Return the first prompt index that does not yet have all samples."""
+        for prompt_idx in range(total):
+            sample_dir = images_dir / f"{prompt_idx:05d}" / "samples"
+            if len(list(sample_dir.glob("*.png"))) < images_per_prompt:
+                return prompt_idx
+        return total
 
     for idx, metadata in tqdm(
         assigned,
         total=len(assigned),
         desc=f"[geneval gen rank {rank}]",
     ):
+        # A reverse fill worker can coexist with the ordinary forward resume
+        # worker.  Stop before their frontiers meet, leaving a safety buffer for
+        # the forward worker and preventing concurrent writes to one prompt.
+        if guard_prefix > 0 and idx <= _completed_prefix() + guard_prefix:
+            break
         prompt_dir = images_dir / f"{idx:05d}"
         samples_dir = prompt_dir / "samples"
         samples_dir.mkdir(parents=True, exist_ok=True)

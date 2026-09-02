@@ -180,6 +180,11 @@ def run_mme_eval_command(args: Any) -> int:
                 print(f"[mme] {task_name} | {idx}: {img} ... inferring", flush=True)
                 output = pipeline.run(payload)
                 response = _post_process(_extract_text(output))
+                # MME stores one sample per TSV line.  Quantized models can emit
+                # control whitespace, so keep the prediction in a single field;
+                # otherwise the official calculator may split one sample into
+                # multiple rows or columns.
+                response = response.replace("\r", " ").replace("\n", " ").replace("\t", " ")
                 if not response.strip():
                     print(f"[mme] WARNING empty response: {task_name}/{img}", flush=True)
                 print(f"[mme] {task_name} | {idx}: {img} -> {response[:80]!r}", flush=True)

@@ -11,6 +11,18 @@ import torch
 from PIL import Image
 
 
+def _conversation_roles(vl_chat_processor: Any) -> tuple[str, str]:
+    sft_format = str(getattr(vl_chat_processor, "sft_format", ""))
+    if sft_format == "deepseek_old":
+        return "User", "Assistant"
+    if sft_format == "deepseek":
+        return "<|User|>", "<|Assistant|>"
+    raise ValueError(
+        "Unsupported Janus sft_format "
+        f"{sft_format!r}; expected 'deepseek_old' or 'deepseek'"
+    )
+
+
 class JanusProBackbone:
     name = "janus_pro"
 
@@ -20,6 +32,7 @@ class JanusProBackbone:
         janus_root: Optional[str] = None,
         seed: int = 42,
         torch_dtype: str = "bfloat16",
+        attn_implementation: Optional[str] = None,
     ) -> None:
         repo_root = Path(__file__).resolve().parents[4]
         self.janus_root = (
@@ -34,6 +47,7 @@ class JanusProBackbone:
         )
         self.seed = seed
         self.torch_dtype = torch_dtype
+        self.attn_implementation = attn_implementation
 
         self.default_generation_cfg: dict[str, Any] = {
             "temperature": 1.0,
@@ -62,6 +76,7 @@ class JanusProBackbone:
             self.janus_root = Path(cfg_janus_root).expanduser()
         self.seed = int(cfg.get("seed", self.seed))
         self.torch_dtype = str(cfg.get("torch_dtype", self.torch_dtype))
+        self.attn_implementation = cfg.get("attn_implementation", self.attn_implementation)
         generation_cfg = cfg.get("generation_cfg")
         if isinstance(generation_cfg, dict):
             self.default_generation_cfg.update(generation_cfg)
@@ -137,13 +152,14 @@ class JanusProBackbone:
 
         user_prompt = prompt if isinstance(prompt, str) and prompt else "Describe the image."
         content = f"<image_placeholder>\n{user_prompt}" if pil_images else user_prompt
+        user_role, assistant_role = _conversation_roles(self.vl_chat_processor)
         conversation = [
             {
-                "role": "<|User|>",
+                "role": user_role,
                 "content": content,
                 "images": image_paths[:1] if image_paths else [],
             },
-            {"role": "<|Assistant|>", "content": ""},
+            {"role": assistant_role, "content": ""},
         ]
 
         prepare_inputs = self.vl_chat_processor(
@@ -211,11 +227,23 @@ class JanusProBackbone:
             torch.set_default_device("cpu")
 
         try:
+            load_kwargs: dict[str, Any] = {
+                "trust_remote_code": True,
+                "low_cpu_mem_usage": False,
+                "device_map": None,
+            }
+            if self.attn_implementation:
+                config = transformers_module.AutoConfig.from_pretrained(
+                    model_path, trust_remote_code=True
+                )
+                language_config = getattr(config, "language_config", None)
+                if language_config is not None:
+                    language_config._attn_implementation = self.attn_implementation
+                    language_config.attn_implementation = self.attn_implementation
+                load_kwargs["config"] = config
             model = transformers_module.AutoModelForCausalLM.from_pretrained(
                 model_path,
-                trust_remote_code=True,
-                low_cpu_mem_usage=False,
-                device_map=None,
+                **load_kwargs,
             )
         finally:
             if hasattr(torch, "set_default_device"):
@@ -225,9 +253,10 @@ class JanusProBackbone:
         return vl_chat_processor, tokenizer, model
 
     def _build_generation_prompt(self, prompt: str) -> str:
+        user_role, assistant_role = _conversation_roles(self.vl_chat_processor)
         conversation = [
-            {"role": "<|User|>", "content": prompt},
-            {"role": "<|Assistant|>", "content": ""},
+            {"role": user_role, "content": prompt},
+            {"role": assistant_role, "content": ""},
         ]
         sft_format = self.vl_chat_processor.apply_sft_template_for_multi_turn_prompts(
             conversations=conversation,

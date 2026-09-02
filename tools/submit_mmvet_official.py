@@ -38,7 +38,11 @@ def _client():
         from gradio_client import Client
     except ImportError as exc:
         raise RuntimeError("gradio_client is required. Install or use an env that provides it.") from exc
-    return Client(SPACE_URL)
+    # Full MM-Vet grading can spend many minutes in the Space queue.  Gradio's
+    # default HTTP read timeout is too short for that legitimate response and
+    # previously caused complete 218-row predictions to be rerun.  The caller
+    # retains its own one-hour process timeout as the hard upper bound.
+    return Client(SPACE_URL, httpx_kwargs={"timeout": 3600.0})
 
 
 def dry_run(path: Path) -> int:
