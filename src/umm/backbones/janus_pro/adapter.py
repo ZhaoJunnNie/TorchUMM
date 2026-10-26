@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import random
 import sys
 from pathlib import Path
@@ -66,6 +67,18 @@ class JanusProBackbone:
         self.vl_chat_processor: Any = None
         self.tokenizer: Any = None
         self.model: Any = None
+        self.operator_quotient: Any = None
+        self.operator_quotient_routes = {
+            "understanding": "cayley",
+            "generation": "baseline",
+        }
+        self.operator_quotient_confidence_threshold = 0.0
+        self.operator_quotient_ensemble_weight = 0.5
+        self.operator_quotient_choice_excluded_labels: set[str] = set()
+        self.operator_quotient_report_path: Optional[Path] = None
+        self.quantization_mode_router: Any = None
+        self.quantization_prefill_selector = False
+        self.quantization_prefill_margin_threshold = 0.0
 
     def load(self, cfg: dict[str, Any]) -> None:
         cfg_model_path = cfg.get("model_path")
@@ -86,6 +99,11 @@ class JanusProBackbone:
 
         self._set_seed(self.seed)
         self.vl_chat_processor, self.tokenizer, self.model = self._build_model()
+        operator_quotient_cfg = cfg.get("operator_quotient")
+        if operator_quotient_cfg is not None:
+            if not isinstance(operator_quotient_cfg, dict):
+                raise TypeError("`operator_quotient` must be a mapping when provided")
+            self._install_operator_quotient(operator_quotient_cfg)
 
     def generate(self, batch: dict[str, Any], gen_cfg: dict[str, Any]) -> Any:
         prompt = batch.get("prompt")
@@ -108,9 +126,12 @@ class JanusProBackbone:
         if generation_cfg:
             config.update(generation_cfg)
 
+        self._route_operator_quotient("generation")
+        self._route_quantization_mode("generation")
         full_prompt = self._build_generation_prompt(prompt)
         images = self._generate_images(full_prompt, config)
         saved_paths = self._save_images(images, output_path)
+        self._write_operator_quotient_report()
         return {
             "image": images[0] if images else None,
             "images": images,
@@ -122,6 +143,7 @@ class JanusProBackbone:
             prompt=batch.get("prompt"),
             images=batch.get("images", []),
             videos=batch.get("videos", []),
+            metadata=batch.get("metadata"),
             understanding_cfg=understanding_cfg,
         )
 
@@ -130,6 +152,7 @@ class JanusProBackbone:
         prompt: Optional[str] = None,
         images: Optional[list[str]] = None,
         videos: Optional[list[str]] = None,
+        metadata: Optional[dict[str, Any]] = None,
         understanding_cfg: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         if self.model is None or self.vl_chat_processor is None:
@@ -162,6 +185,8 @@ class JanusProBackbone:
             {"role": assistant_role, "content": ""},
         ]
 
+        self._route_operator_quotient("understanding")
+        self._route_quantization_mode("understanding")
         prepare_inputs = self.vl_chat_processor(
             conversations=conversation,
             images=pil_images,
@@ -173,19 +198,556 @@ class JanusProBackbone:
         if understanding_cfg:
             config.update(understanding_cfg)
 
-        outputs = self.model.language_model.generate(
-            inputs_embeds=inputs_embeds,
-            attention_mask=prepare_inputs.attention_mask,
-            pad_token_id=self.tokenizer.eos_token_id,
-            bos_token_id=self.tokenizer.bos_token_id,
-            eos_token_id=self.tokenizer.eos_token_id,
-            max_new_tokens=int(config.get("max_new_tokens", 512)),
-            do_sample=bool(config.get("do_sample", False)),
-            use_cache=bool(config.get("use_cache", True)),
-        )
+        quantization_route_diagnostics = None
+        if self.quantization_prefill_selector:
+            _, quantization_route_diagnostics = (
+                self._select_quantization_confidence_route(
+                    inputs_embeds=inputs_embeds,
+                    attention_mask=prepare_inputs.attention_mask,
+                    metadata=metadata,
+                )
+            )
 
-        answer = self.tokenizer.decode(outputs[0].cpu().tolist(), skip_special_tokens=True)
-        return {"text": answer, "sft_format": prepare_inputs["sft_format"][0]}
+        route = self.operator_quotient_routes["understanding"]
+        route_diagnostics = None
+        if route == "confidence_cayley_prefill_decode_baseline":
+            route, route_diagnostics = self._select_confidence_route(
+                inputs_embeds=inputs_embeds,
+                attention_mask=prepare_inputs.attention_mask,
+                metadata=metadata,
+            )
+        if route == "unanimous_cayley_choice_fallback_baseline":
+            selected_choice, route_diagnostics = self._select_unanimous_cayley_choice(
+                inputs_embeds=inputs_embeds,
+                attention_mask=prepare_inputs.attention_mask,
+                metadata=metadata,
+            )
+            if selected_choice is not None:
+                answer = selected_choice
+            else:
+                outputs = self._generate_understanding_tokens(
+                    inputs_embeds=inputs_embeds,
+                    attention_mask=prepare_inputs.attention_mask,
+                    config=config,
+                    route="baseline",
+                )
+                answer = self.tokenizer.decode(
+                    outputs[0].cpu().tolist(), skip_special_tokens=True
+                )
+        else:
+            outputs = self._generate_understanding_tokens(
+                inputs_embeds=inputs_embeds,
+                attention_mask=prepare_inputs.attention_mask,
+                config=config,
+                route=route,
+            )
+            answer = self.tokenizer.decode(
+                outputs[0].cpu().tolist(), skip_special_tokens=True
+            )
+        self._write_operator_quotient_report()
+        return {
+            "text": answer,
+            "sft_format": prepare_inputs["sft_format"][0],
+            "operator_route": route,
+            "operator_route_diagnostics": route_diagnostics,
+            "quantization_route_diagnostics": quantization_route_diagnostics,
+        }
+
+
+    def _install_operator_quotient(self, cfg: dict[str, Any]) -> None:
+        if self.model is None:
+            raise RuntimeError("Janus model must be loaded before installing operator quotient")
+        project_root_value = cfg.get("project_root")
+        if not isinstance(project_root_value, str) or not project_root_value:
+            raise ValueError("operator_quotient.project_root is required")
+        project_root = Path(project_root_value).expanduser().resolve()
+        if not project_root.is_dir():
+            raise FileNotFoundError(f"operator quotient project root not found: {project_root}")
+        project_root_str = str(project_root)
+        if project_root_str not in sys.path:
+            sys.path.insert(0, project_root_str)
+
+        deployment_module = importlib.import_module(
+            "operator_equivalence.janus_cayley_deployment"
+        )
+        understanding_route = str(cfg.get("understanding_route", "cayley"))
+        generation_route = str(cfg.get("generation_route", "baseline"))
+        understanding_routes = {
+            "baseline",
+            "cayley",
+            "prefill_cayley_decode_baseline",
+            "prefill_logit_ensemble_decode_baseline",
+            "confidence_cayley_prefill_decode_baseline",
+            "unanimous_cayley_choice_fallback_baseline",
+        }
+        if understanding_route not in understanding_routes:
+            raise ValueError(
+                "operator quotient understanding route must be baseline, cayley, "
+                "prefill_cayley_decode_baseline, "
+                "prefill_logit_ensemble_decode_baseline, or "
+                "confidence_cayley_prefill_decode_baseline, or "
+                "unanimous_cayley_choice_fallback_baseline"
+            )
+        if generation_route not in {"baseline", "cayley"}:
+            raise ValueError("operator quotient generation route must be baseline or cayley")
+        self.operator_quotient_routes = {
+            "understanding": understanding_route,
+            "generation": generation_route,
+        }
+        self.operator_quotient_confidence_threshold = float(
+            cfg.get("confidence_delta_margin_threshold", 0.0)
+        )
+        self.operator_quotient_ensemble_weight = float(
+            cfg.get("ensemble_cayley_weight", 0.5)
+        )
+        if not 0.0 <= self.operator_quotient_ensemble_weight <= 1.0:
+            raise ValueError("operator quotient ensemble_cayley_weight must be in [0, 1]")
+        excluded_labels = cfg.get("unanimous_choice_excluded_labels", [])
+        if not isinstance(excluded_labels, list):
+            raise TypeError(
+                "operator quotient unanimous_choice_excluded_labels must be a list"
+            )
+        self.operator_quotient_choice_excluded_labels = {
+            str(label).strip().upper() for label in excluded_labels
+        }
+        invalid_labels = self.operator_quotient_choice_excluded_labels.difference(
+            "ABCDEFGHIJKLM"
+        )
+        if invalid_labels:
+            raise ValueError(
+                "operator quotient unanimous_choice_excluded_labels contains "
+                f"unsupported labels: {sorted(invalid_labels)}"
+            )
+        report_path = cfg.get("report_path")
+        if report_path:
+            self.operator_quotient_report_path = Path(str(report_path)).expanduser().resolve()
+
+        self.operator_quotient = deployment_module.install_mode_routed_cayley_w4a8(
+            self.model,
+            correction_map_path=cfg["correction_map_path"],
+            activation_result_path=cfg["activation_result_path"],
+            cayley_calibration_result_path=cfg["cayley_calibration_result_path"],
+            initial_state=self.operator_quotient_routes["generation"],
+            weight_row_chunk=int(cfg.get("weight_row_chunk", 256)),
+            cayley_strength=float(cfg.get("cayley_strength", 1.0)),
+            source_paths=cfg.get("source_paths"),
+        )
+        self._write_operator_quotient_report()
+
+    def _route_operator_quotient(self, mode: str) -> None:
+        if self.operator_quotient is None:
+            return
+        route = self.operator_quotient_routes[mode]
+        if route in {
+            "prefill_cayley_decode_baseline",
+            "confidence_cayley_prefill_decode_baseline",
+        }:
+            route = "cayley"
+        elif route in {
+            "prefill_logit_ensemble_decode_baseline",
+            "unanimous_cayley_choice_fallback_baseline",
+        }:
+            route = "baseline"
+        self.operator_quotient.install(route)
+
+    def _route_quantization_mode(self, mode: str) -> None:
+        if self.quantization_mode_router is not None:
+            self.quantization_mode_router(mode)
+
+    def _select_unanimous_cayley_choice(
+        self,
+        *,
+        inputs_embeds: torch.Tensor,
+        attention_mask: torch.Tensor,
+        metadata: Optional[dict[str, Any]],
+    ) -> tuple[Optional[str], dict[str, Any]]:
+        choices_raw = metadata.get("choices") if isinstance(metadata, dict) else None
+        if not isinstance(choices_raw, dict) or len(choices_raw) < 2:
+            return None, {
+                "reason": "non_multiple_choice_or_missing_choices",
+                "selected": "baseline_generation",
+            }
+        choices = [choice for choice in "ABCDEFGHIJKLM" if choice in choices_raw]
+        if len(choices) < 2:
+            return None, {
+                "reason": "unsupported_choice_labels",
+                "selected": "baseline_generation",
+            }
+
+        stems = {
+            "empty": ("", True),
+            "answer_colon": ("Answer:", True),
+            "answer_is": ("The answer is", True),
+            "answer_paren": ("The answer is (", False),
+        }
+        language_model = self.model.language_model
+        self.operator_quotient.install("cayley")
+        predictions: dict[str, str] = {}
+        scores: dict[str, dict[str, float]] = {}
+        with torch.inference_mode():
+            for name, (stem, leading_space) in stems.items():
+                stem_ids = self.tokenizer.encode(stem, add_special_tokens=False)
+                stem_embeds = (
+                    language_model.get_input_embeddings()(
+                        torch.tensor(
+                            stem_ids,
+                            dtype=torch.long,
+                            device=inputs_embeds.device,
+                        ).unsqueeze(0)
+                    )
+                    if stem_ids
+                    else inputs_embeds[:, :0]
+                )
+                stem_mask = torch.ones(
+                    (1, len(stem_ids)),
+                    dtype=attention_mask.dtype,
+                    device=attention_mask.device,
+                )
+                prefix_embeds = torch.cat([inputs_embeds, stem_embeds], dim=1)
+                prefix_mask = torch.cat([attention_mask, stem_mask], dim=1)
+                candidates = [
+                    f" {choice}" if leading_space else choice for choice in choices
+                ]
+                totals = self._choice_candidate_scores(
+                    prefix_embeds=prefix_embeds,
+                    prefix_mask=prefix_mask,
+                    candidates=candidates,
+                )
+                best_index = max(range(len(totals)), key=totals.__getitem__)
+                predictions[name] = choices[best_index]
+                scores[name] = {
+                    choice: totals[index] for index, choice in enumerate(choices)
+                }
+        self.operator_quotient.install("baseline")
+        unanimous = len(set(predictions.values())) == 1
+        unanimous_choice = next(iter(predictions.values())) if unanimous else None
+        excluded = unanimous_choice in self.operator_quotient_choice_excluded_labels
+        selected_choice = unanimous_choice if unanimous and not excluded else None
+        return selected_choice, {
+            "reason": (
+                "excluded_unanimous_label_prior"
+                if excluded
+                else "four_prompt_unanimous_cayley_choice"
+                if unanimous
+                else "cayley_choice_disagreement"
+            ),
+            "predictions": predictions,
+            "scores": scores,
+            "excluded_labels": sorted(
+                self.operator_quotient_choice_excluded_labels
+            ),
+            "selected": selected_choice or "baseline_generation",
+        }
+
+    def _choice_candidate_scores(
+        self,
+        *,
+        prefix_embeds: torch.Tensor,
+        prefix_mask: torch.Tensor,
+        candidates: list[str],
+    ) -> list[float]:
+        language_model = self.model.language_model
+        token_rows = [
+            self.tokenizer.encode(text, add_special_tokens=False)
+            for text in candidates
+        ]
+        if any(not row for row in token_rows):
+            raise RuntimeError("choice candidate tokenization produced an empty sequence")
+        max_tokens = max(len(row) for row in token_rows)
+        token_ids = torch.full(
+            (len(token_rows), max_tokens),
+            int(self.tokenizer.eos_token_id),
+            dtype=torch.long,
+            device=prefix_embeds.device,
+        )
+        candidate_mask = torch.zeros_like(token_ids)
+        for index, row in enumerate(token_rows):
+            token_ids[index, : len(row)] = torch.tensor(
+                row, dtype=torch.long, device=token_ids.device
+            )
+            candidate_mask[index, : len(row)] = 1
+
+        candidate_embeds = language_model.get_input_embeddings()(token_ids)
+        batch = len(token_rows)
+        combined_embeds = torch.cat(
+            [prefix_embeds.expand(batch, -1, -1), candidate_embeds], dim=1
+        )
+        combined_mask = torch.cat(
+            [prefix_mask.expand(batch, -1), candidate_mask], dim=1
+        )
+        prefix_length = int(prefix_embeds.shape[1])
+        hidden = language_model.model(
+            inputs_embeds=combined_embeds,
+            attention_mask=combined_mask,
+            use_cache=False,
+            return_dict=True,
+        ).last_hidden_state
+        prediction_hidden = hidden[
+            :, prefix_length - 1 : prefix_length - 1 + max_tokens
+        ]
+        log_probs = language_model.lm_head(prediction_hidden).float().log_softmax(dim=-1)
+        totals: list[float] = []
+        for index, row in enumerate(token_rows):
+            length = len(row)
+            targets = token_ids[index, :length]
+            values = log_probs[index, :length].gather(
+                -1, targets.unsqueeze(-1)
+            ).squeeze(-1)
+            totals.append(float(values.sum().item()))
+        return totals
+
+    def _select_confidence_route(
+        self,
+        *,
+        inputs_embeds: torch.Tensor,
+        attention_mask: torch.Tensor,
+        metadata: Optional[dict[str, Any]],
+    ) -> tuple[str, dict[str, Any]]:
+        choices_raw = metadata.get("choices") if isinstance(metadata, dict) else None
+        if not isinstance(choices_raw, dict) or len(choices_raw) < 2:
+            return "baseline", {
+                "reason": "non_multiple_choice_or_missing_choices",
+                "selected": "baseline",
+            }
+        choices = [choice for choice in "ABCDEFGHIJKLM" if choice in choices_raw]
+        if len(choices) < 2:
+            return "baseline", {
+                "reason": "unsupported_choice_labels",
+                "selected": "baseline",
+            }
+
+        variant_ids = {
+            choice: tuple(
+                dict.fromkeys(
+                    self.tokenizer.encode(text, add_special_tokens=False)[0]
+                    for text in (choice, f" {choice}")
+                )
+            )
+            for choice in choices
+        }
+        margins: dict[str, float] = {}
+        probabilities: dict[str, dict[str, float]] = {}
+        with torch.inference_mode():
+            for state in ("baseline", "cayley"):
+                self.operator_quotient.install(state)
+                output = self.model.language_model(
+                    inputs_embeds=inputs_embeds,
+                    attention_mask=attention_mask,
+                    use_cache=False,
+                    return_dict=True,
+                )
+                log_probs = output.logits[0, -1].float().log_softmax(dim=-1)
+                option_scores = torch.stack(
+                    [
+                        torch.logsumexp(log_probs[list(variant_ids[choice])], dim=0)
+                        for choice in choices
+                    ]
+                )
+                conditional = option_scores.softmax(dim=0)
+                ordered = torch.sort(conditional, descending=True).values
+                margins[state] = float((ordered[0] - ordered[1]).item())
+                probabilities[state] = {
+                    choice: float(conditional[index].item())
+                    for index, choice in enumerate(choices)
+                }
+        delta_margin = margins["cayley"] - margins["baseline"]
+        use_cayley = delta_margin < self.operator_quotient_confidence_threshold
+        selected = (
+            "prefill_cayley_decode_baseline" if use_cayley else "baseline"
+        )
+        return selected, {
+            "reason": "frozen_delta_margin_threshold",
+            "threshold": self.operator_quotient_confidence_threshold,
+            "delta_margin": delta_margin,
+            "margins": margins,
+            "option_probabilities": probabilities,
+            "selected": selected,
+        }
+
+    def _select_quantization_confidence_route(
+        self,
+        *,
+        inputs_embeds: torch.Tensor,
+        attention_mask: torch.Tensor,
+        metadata: Optional[dict[str, Any]],
+    ) -> tuple[str, dict[str, Any]]:
+        """Select a quantized fiber only when its option decision self-certifies.
+
+        The candidate noninvertible section is rejected unless it and the
+        unchanged QuaRot arm choose the same option and its conditional top-two
+        option margin improves by more than the frozen threshold. Inputs without
+        structured multiple-choice metadata always remain on QuaRot.
+        """
+        choices_raw = metadata.get("choices") if isinstance(metadata, dict) else None
+        if not isinstance(choices_raw, dict) or len(choices_raw) < 2:
+            selected = "understanding_static"
+            self._route_quantization_mode(selected)
+            return selected, {
+                "reason": "non_multiple_choice_or_missing_choices",
+                "selected": selected,
+            }
+        choices = [choice for choice in "ABCDEFGHIJKLM" if choice in choices_raw]
+        if len(choices) < 2:
+            selected = "understanding_static"
+            self._route_quantization_mode(selected)
+            return selected, {
+                "reason": "unsupported_choice_labels",
+                "selected": selected,
+            }
+
+        variant_ids: dict[str, tuple[int, ...]] = {}
+        for choice in choices:
+            ids = []
+            for text in (choice, f" {choice}"):
+                encoded = self.tokenizer.encode(text, add_special_tokens=False)
+                if not encoded:
+                    raise RuntimeError(
+                        f"choice label {choice!r} produced empty tokenization"
+                    )
+                ids.append(int(encoded[0]))
+            variant_ids[choice] = tuple(dict.fromkeys(ids))
+
+        margins: dict[str, float] = {}
+        predictions: dict[str, str] = {}
+        probabilities: dict[str, dict[str, float]] = {}
+        arm_modes = {
+            "static": "understanding_static",
+            "candidate": "understanding_candidate",
+        }
+        with torch.inference_mode():
+            for arm, mode in arm_modes.items():
+                self._route_quantization_mode(mode)
+                output = self.model.language_model(
+                    inputs_embeds=inputs_embeds,
+                    attention_mask=attention_mask,
+                    use_cache=False,
+                    return_dict=True,
+                )
+                log_probs = output.logits[0, -1].float().log_softmax(dim=-1)
+                option_scores = torch.stack(
+                    [
+                        torch.logsumexp(log_probs[list(variant_ids[choice])], dim=0)
+                        for choice in choices
+                    ]
+                )
+                conditional = option_scores.softmax(dim=0)
+                order = torch.argsort(conditional, descending=True)
+                predictions[arm] = choices[int(order[0].item())]
+                margins[arm] = float(
+                    (conditional[order[0]] - conditional[order[1]]).item()
+                )
+                probabilities[arm] = {
+                    choice: float(conditional[index].item())
+                    for index, choice in enumerate(choices)
+                }
+
+        delta_margin = margins["candidate"] - margins["static"]
+        agrees = predictions["candidate"] == predictions["static"]
+        threshold = float(self.quantization_prefill_margin_threshold)
+        use_candidate = agrees and delta_margin > threshold
+        selected = arm_modes["candidate" if use_candidate else "static"]
+        self._route_quantization_mode(selected)
+        return selected, {
+            "reason": (
+                "agreement_and_margin_improvement"
+                if use_candidate
+                else "arm_disagreement"
+                if not agrees
+                else "insufficient_margin_improvement"
+            ),
+            "threshold": threshold,
+            "delta_margin": delta_margin,
+            "margins": margins,
+            "predictions": predictions,
+            "option_probabilities": probabilities,
+            "selected": selected,
+        }
+
+    def _generate_understanding_tokens(
+        self,
+        *,
+        inputs_embeds: torch.Tensor,
+        attention_mask: torch.Tensor,
+        config: dict[str, Any],
+        route: str,
+    ) -> torch.Tensor:
+        language_model = self.model.language_model
+        generation_kwargs = {
+            "inputs_embeds": inputs_embeds,
+            "attention_mask": attention_mask,
+            "pad_token_id": self.tokenizer.eos_token_id,
+            "bos_token_id": self.tokenizer.bos_token_id,
+            "eos_token_id": self.tokenizer.eos_token_id,
+            "max_new_tokens": int(config.get("max_new_tokens", 512)),
+            "do_sample": bool(config.get("do_sample", False)),
+            "use_cache": bool(config.get("use_cache", True)),
+        }
+        phase_routed = {
+            "prefill_cayley_decode_baseline",
+            "prefill_logit_ensemble_decode_baseline",
+        }
+        if self.operator_quotient is None or route not in phase_routed:
+            if self.operator_quotient is not None:
+                self.operator_quotient.install(route)
+            return language_model.generate(**generation_kwargs)
+
+        original_forward = language_model.forward
+
+        def phase_routed_forward(*args: Any, **kwargs: Any) -> Any:
+            cache = kwargs.get("past_key_values")
+            has_cache = False
+            if cache is not None:
+                get_seq_length = getattr(cache, "get_seq_length", None)
+                if callable(get_seq_length):
+                    has_cache = int(get_seq_length()) > 0
+                else:
+                    try:
+                        if len(cache) > 0:
+                            first_key = cache[0][0]
+                            has_cache = int(first_key.shape[-2]) > 0
+                    except (IndexError, TypeError, AttributeError):
+                        has_cache = True
+            if has_cache:
+                self.operator_quotient.install("baseline")
+                return original_forward(*args, **kwargs)
+            if route == "prefill_cayley_decode_baseline":
+                self.operator_quotient.install("cayley")
+                return original_forward(*args, **kwargs)
+
+            candidate_kwargs = dict(kwargs)
+            candidate_kwargs["use_cache"] = False
+            candidate_kwargs.pop("past_key_values", None)
+            self.operator_quotient.install("cayley")
+            candidate_output = original_forward(*args, **candidate_kwargs)
+            self.operator_quotient.install("baseline")
+            baseline_output = original_forward(*args, **kwargs)
+            weight = self.operator_quotient_ensemble_weight
+            baseline_output.logits = torch.lerp(
+                baseline_output.logits.float(),
+                candidate_output.logits.float(),
+                weight,
+            ).to(dtype=baseline_output.logits.dtype)
+            self.operator_quotient.install("baseline")
+            return baseline_output
+
+        language_model.forward = phase_routed_forward
+        try:
+            return language_model.generate(**generation_kwargs)
+        finally:
+            language_model.forward = original_forward
+
+    def _write_operator_quotient_report(self) -> None:
+        if self.operator_quotient is None or self.operator_quotient_report_path is None:
+            return
+        self.operator_quotient_report_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.operator_quotient_report_path.with_suffix(
+            self.operator_quotient_report_path.suffix + ".tmp"
+        )
+        temporary.write_text(
+            json.dumps(self.operator_quotient.report(), indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        temporary.replace(self.operator_quotient_report_path)
 
 
     @staticmethod

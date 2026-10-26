@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import random
 import subprocess
@@ -202,6 +203,15 @@ def run_mmmu_eval_command(args: Any) -> int:
         repo_root,
     )
     max_samples = int(mmmu_cfg.get("max_samples", 0) or 0)
+    sample_strategy = str(mmmu_cfg.get("sample_strategy", "head")).strip().lower()
+    if sample_strategy not in {"head", "uniform_stride", "uniform_midpoint"}:
+        raise ValueError(
+            "`mmmu.sample_strategy` must be head, uniform_stride, or uniform_midpoint"
+        )
+    exclude_indices_value = mmmu_cfg.get("exclude_indices", [])
+    if not isinstance(exclude_indices_value, list):
+        raise ValueError("`mmmu.exclude_indices` must be a list of dataset indices")
+    exclude_indices = {int(index) for index in exclude_indices_value}
     max_images = int(mmmu_cfg.get("max_images", 1) or 1)
     seed = int(mmmu_cfg.get("seed", 0) or 0)
 
@@ -247,11 +257,64 @@ def run_mmmu_eval_command(args: Any) -> int:
             print(f"[mmmu] resume: {len(done_ids)} done, skipping completed items", flush=True)
 
         total = len(dataset)
+        selected_indices: set[int] | None = None
+        if sample_strategy == "uniform_stride" and max_samples > 0:
+            if max_samples > total:
+                raise ValueError(
+                    f"MMMU max_samples={max_samples} exceeds dataset size {total}"
+                )
+            if max_samples == 1:
+                selected_indices = {0}
+            else:
+                selected_indices = {
+                    round(index * (total - 1) / (max_samples - 1))
+                    for index in range(max_samples)
+                }
+            if len(selected_indices) != max_samples:
+                raise RuntimeError("uniform_stride produced duplicate MMMU indices")
+            summary[f"{ds_name}_selected_indices"] = sorted(selected_indices)
+        elif sample_strategy == "uniform_midpoint" and max_samples > 0:
+            if max_samples > total:
+                raise ValueError(
+                    f"MMMU max_samples={max_samples} exceeds dataset size {total}"
+                )
+            selected_indices = set()
+            for index in range(max_samples):
+                bucket_start = math.floor(index * total / max_samples)
+                bucket_end = math.floor((index + 1) * total / max_samples) - 1
+                target = min(
+                    total - 1,
+                    math.floor((index + 0.5) * total / max_samples),
+                )
+                candidates = sorted(
+                    range(bucket_start, bucket_end + 1),
+                    key=lambda candidate: (abs(candidate - target), candidate),
+                )
+                selected = next(
+                    (
+                        candidate
+                        for candidate in candidates
+                        if candidate not in exclude_indices
+                        and candidate not in selected_indices
+                    ),
+                    None,
+                )
+                if selected is None:
+                    raise RuntimeError(
+                        f"uniform_midpoint bucket {index} has no eligible index"
+                    )
+                selected_indices.add(selected)
+            if len(selected_indices) != max_samples:
+                raise RuntimeError("uniform_midpoint produced duplicate MMMU indices")
+            summary[f"{ds_name}_selected_indices"] = sorted(selected_indices)
+            summary[f"{ds_name}_excluded_indices"] = sorted(exclude_indices)
         remaining = total - len(done_ids)
         print(f"[mmmu] {ds_name}: {total} total, {len(done_ids)} done, {remaining} remaining", flush=True)
 
         with checkpoint_jsonl.open("a", encoding="utf-8") as ckpt_writer:
             for idx, sample in enumerate(tqdm(dataset, desc=f"mmmu/{ds_name}", file=sys.stdout), start=1):
+                if selected_indices is not None and (idx - 1) not in selected_indices:
+                    continue
                 data = data_utils.process_single_sample(sample)
                 data_id = str(data["id"])
                 if data_id in done_ids:
@@ -304,6 +367,17 @@ def run_mmmu_eval_command(args: Any) -> int:
                     "prompt": prompt,
                     "raw_response": response,
                 }
+                if isinstance(output, dict) and output.get("operator_route") is not None:
+                    item["operator_route"] = output["operator_route"]
+                    item["operator_route_diagnostics"] = output.get(
+                        "operator_route_diagnostics"
+                    )
+                if isinstance(output, dict) and output.get(
+                    "quantization_route_diagnostics"
+                ) is not None:
+                    item["quantization_route_diagnostics"] = output[
+                        "quantization_route_diagnostics"
+                    ]
                 outputs.append(item)
                 ckpt_writer.write(json.dumps(item) + "\n")
                 ckpt_writer.flush()

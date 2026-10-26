@@ -722,7 +722,8 @@ def run_mmbench_eval_command(args: Any) -> int:
                             "choices": options,
                         },
                     }
-                    prediction = _extract_text(pipeline.run(payload))
+                    output = pipeline.run(payload)
+                    prediction = _extract_text(output)
                     gt = None
                     if "answer" in row and not pd.isna(row["answer"]):
                         gt = str(row["answer"]).strip().upper()
@@ -734,6 +735,12 @@ def run_mmbench_eval_command(args: Any) -> int:
                         "gt_answer": gt,
                         "language": language,
                     }
+                    if isinstance(output, dict) and output.get(
+                        "quantization_route_diagnostics"
+                    ) is not None:
+                        item["quantization_route_diagnostics"] = output[
+                            "quantization_route_diagnostics"
+                        ]
                     outputs.append(item)
                     done_indices.add(row_index)
                     ckpt_writer.write(json.dumps(item) + "\n")

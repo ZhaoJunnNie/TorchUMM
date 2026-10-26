@@ -18,6 +18,9 @@ def run_eval_command(args: Any) -> int:
 
     # Lazy imports to avoid pulling heavy deps that may not be installed
     # in every container image (e.g. geneval image lacks `datasets`).
+    if benchmark == "lmms" or "lmms" in raw_cfg:
+        from umm.cli.lmms_eval import run_lmms_eval_command as _fn
+        return _fn(args)
     if benchmark == "dpg_bench" or "dpg_bench" in raw_cfg:
         from umm.cli.dpg_bench import run_eval_command as _fn
         return _fn(args)

@@ -1,0 +1,37 @@
+# Independent lmms-eval protocol; does not replace an existing UMM experiment.
+eval:
+  benchmark: lmms
+
+inference:
+  backbone: emu3_5
+  backbone_cfg:
+    model_path: ${UMM_MODEL_CACHE}/emu3_5/Emu3.5
+    vq_path: ${UMM_MODEL_CACHE}/emu3_5/Emu3.5-VisionTokenizer
+    emu3_5_root: ${UMM_CODEBASE}/model/Emu3.5
+    use_vllm: true
+    tensor_parallel_size: 2
+    gpu_memory_utilization: 0.7
+    seed: 0
+    understanding_cfg:
+      image_area: 518400
+      classifier_free_guidance: 2.0
+      do_sample: false
+
+lmms:
+  source_path: ${LMMS_EVAL_ROOT}
+  revision: 8f40097532a7bf4db6123713f1a905e02c8f5971
+  tasks: [ocrbench, chartqa, mmerealworld, textvqa_val]
+  out_dir: output/lmms/emu3_5/run01
+  model_identity:
+    state_id: fp-from-model-path
+    model_path: ${UMM_MODEL_CACHE}/emu3_5/Emu3.5
+    vision_tokenizer_path: ${UMM_MODEL_CACHE}/emu3_5/Emu3.5-VisionTokenizer
+  batch_size: 1
+  seed: 0
+  limit: null
+  bootstrap_iters: 100000
+  task_overrides: {}
+  generation_defaults:
+    max_new_tokens: 128
+    do_sample: false
+  generation_overrides: {}

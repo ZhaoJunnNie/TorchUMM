@@ -536,13 +536,30 @@ def run_mathvista_eval_command(args: Any) -> int:
                         "prompt": prompt,
                         "images": [str(image_path)],
                         "params": request_params,
-                        "metadata": {"pid": pid, "dataset": ds_name},
+                        "metadata": {
+                            "pid": pid,
+                            "dataset": ds_name,
+                            "question_type": data_item.get("question_type"),
+                            "choices": {
+                                chr(ord("A") + choice_index): str(choice)
+                                for choice_index, choice in enumerate(
+                                    data_item.get("choices") or []
+                                )
+                            },
+                        },
                     }
-                    response = _extract_text(pipeline.run(payload))
+                    output = pipeline.run(payload)
+                    response = _extract_text(output)
 
                     item = dict(data_item)
                     item.pop("decoded_image", None)
                     item["response"] = response
+                    if isinstance(output, dict) and output.get(
+                        "quantization_route_diagnostics"
+                    ) is not None:
+                        item["quantization_route_diagnostics"] = output[
+                            "quantization_route_diagnostics"
+                        ]
                     results[str(pid)] = item
 
                     checkpoint_json.write_text(json.dumps(results, indent=2), encoding="utf-8")

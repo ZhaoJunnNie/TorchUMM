@@ -1,9 +1,8 @@
 """Response Parsing and Evaluation for various models"""
-import random
+import hashlib
 import re
 from typing import Dict
 
-random.seed(42)
 import numpy as np
 
 
@@ -37,8 +36,10 @@ def parse_multi_choice_response(response, all_choices, index2ans):
                 candidates.append(index)
                 index_ans = False  # it's content ans.
 
-    if len(candidates) == 0:  # still not get answer, randomly choose one.
-        pred_index = random.choice(all_choices)
+    if len(candidates) == 0:
+        payload = f"{response}\0{'|'.join(all_choices)}".encode("utf-8")
+        fallback_index = int.from_bytes(hashlib.sha256(payload).digest()[:8], "big")
+        pred_index = all_choices[fallback_index % len(all_choices)]
     elif len(candidates) > 1:
         start_indexes = []
         if index_ans:

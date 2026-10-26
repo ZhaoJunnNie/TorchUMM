@@ -1,0 +1,35 @@
+# Independent lmms-eval protocol; does not replace an existing UMM experiment.
+eval:
+  benchmark: lmms
+
+inference:
+  backbone: janus_pro
+  backbone_cfg:
+    model_path: ${UMM_MODEL_CACHE}/janus_pro/Janus-Pro-7B
+    janus_root: ${UMM_CODEBASE}/model/janus_pro/Janus
+    seed: 0
+    torch_dtype: bfloat16
+    understanding_cfg:
+      do_sample: false
+      use_cache: true
+
+lmms:
+  source_path: ${LMMS_EVAL_ROOT}
+  revision: 8f40097532a7bf4db6123713f1a905e02c8f5971
+  tasks: [ocrbench, chartqa, mmerealworld, textvqa_val]
+  # Change to a fresh directory for every attempt/arm; existing outputs are refused.
+  out_dir: output/lmms/janus_pro/run01
+  model_identity:
+    state_id: fp-from-model-path
+    model_path: ${UMM_MODEL_CACHE}/janus_pro/Janus-Pro-7B
+  batch_size: 1
+  seed: 0
+  limit: null
+  bootstrap_iters: 100000
+  task_overrides: {}
+  # These fill missing task kwargs; task-provided values (e.g. 16) take priority.
+  generation_defaults:
+    max_new_tokens: 128
+    do_sample: false
+  # Overrides change the upstream protocol and are recorded separately.
+  generation_overrides: {}

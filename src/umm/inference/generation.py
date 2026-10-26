@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
 
@@ -30,12 +31,16 @@ def run_editing(backbone: Any, batch: dict[str, Any], cfg: dict[str, Any]) -> An
 
 def run_understanding(backbone: Any, batch: dict[str, Any], cfg: dict[str, Any]) -> Any:
     if hasattr(backbone, "understanding"):
-        return backbone.understanding(
-            prompt=batch.get("prompt"),
-            images=batch.get("images", []),
-            videos=batch.get("videos", []),
-            understanding_cfg=cfg,
-        )
+        understanding_kwargs = {
+            "prompt": batch.get("prompt"),
+            "images": batch.get("images", []),
+            "videos": batch.get("videos", []),
+            "understanding_cfg": cfg,
+        }
+        parameters = inspect.signature(backbone.understanding).parameters
+        if "metadata" in parameters:
+            understanding_kwargs["metadata"] = batch.get("metadata")
+        return backbone.understanding(**understanding_kwargs)
     if hasattr(backbone, "understand"):
         return backbone.understand(batch=batch, understanding_cfg=cfg)
     if hasattr(backbone, "encode"):
